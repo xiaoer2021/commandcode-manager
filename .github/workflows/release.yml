@@ -1,0 +1,59 @@
+name: Build and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: modern/ui/package-lock.json
+      - name: Validate release tag
+        shell: powershell
+        run: |
+          $ccVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ccVersion") { throw 'Tag and version.json must match' }
+      - name: Check source boundaries
+        shell: powershell
+        run: ./installer/audit-source.ps1
+      - name: Build installer
+        shell: powershell
+        run: |
+          if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue) -and -not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+          ./installer/build.ps1
+      - name: Verify portable features
+        shell: powershell
+        run: ./modern/tests/portable-features.ps1
+      - name: Verify history cache
+        shell: powershell
+        run: ./modern/tests/history-cache.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            release/CommandCode-Manager-Setup-*.exe
+            release/CommandCode-Manager-Portable-*.zip
+            release/SHA256SUMS.txt
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          gh release create $env:GITHUB_REF_NAME --verify-tag --title "CommandCode Manager $env:GITHUB_REF_NAME" --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
+          gh release upload $env:GITHUB_REF_NAME release/CommandCode-Manager-Setup-*.exe release/CommandCode-Manager-Portable-*.zip release/SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

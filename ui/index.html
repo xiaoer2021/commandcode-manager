@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>CommandCode Manager</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <aside>
+    <div class="brand"><span class="logo">⌘</span><div>COMMANDCODE<small>ACCOUNT MANAGER</small></div></div>
+    <div class="workspace"><span class="dot"></span>本地工作空间<small>凭据由 Windows 加密保护</small></div>
+    <nav><button id="overview-nav" class="selected">▦ <span>账号总览</span></button><button id="alerts-nav">◉ <span>预警中心</span><b id="alert-count">0</b></button><button id="settings-nav">⚙ <span>监控设置</span></button></nav>
+    <div class="sidebar-bottom"><span class="dot"></span><span id="monitor-status">自动监控已开启</span><small>关闭窗口后继续在托盘监控</small><button id="docs">查看官方文档 ↗</button></div>
+  </aside>
+  <main>
+    <header><div class="breadcrumb">工作空间 <span>/</span> <strong id="page-title">账号总览</strong></div><div class="header-meta"><span class="dot"></span>本地加密 · 独立账号</div></header>
+    <section class="heading"><div><div class="eyebrow">YOUR CODING ACCOUNTS, IN ONE PLACE</div><h1>掌控每一个账号<span>.</span></h1><p>额度、周期与登录切换，一处管理。</p></div><div class="actions"><button id="refresh">↻ 刷新用量</button><button id="add" class="primary">＋ 添加账号</button></div></section>
+    <div id="environment-banner" class="notice" hidden></div>
+    <div id="preview-banner" class="notice" hidden>界面预览：未连接桌面服务。启动桌面客户端后可添加真实账号。</div>
+    <section id="overview">
+      <div class="stats"><article><label>管理账号</label><strong id="total">0 <small>个账号</small></strong><footer>密码登录与 API Key 均支持</footer></article><article><label>已获取的剩余额度</label><strong id="balance">—</strong><footer id="balance-note">添加账号后自动同步</footer></article><article><label>需要关注</label><strong id="warning-total" class="amber">0 <small>个账号</small></strong><footer>额度不足、临近周期或同步异常</footer></article><article><label>本机当前账号</label><strong id="active-name" class="current-name">尚未识别</strong><footer>切换后对新开的会话生效</footer></article></div>
+      <div class="list-heading"><h2>全部账号 <span id="list-count">00</span></h2><label class="search">⌕ <input id="search" placeholder="搜索名称、邮箱或套餐" aria-label="搜索账号"></label></div>
+      <div id="accounts" class="account-grid"></div>
+      <div id="empty" class="empty"><div class="empty-icon">⌘</div><h2>把你的第一个账号加进来</h2><p>使用邮箱密码在官方页面登录，或直接添加 API Key。<br>用量会自动同步，达到阈值时收到桌面提醒。</p><button id="empty-add" class="primary">＋ 添加账号</button><button id="import">导入本机已登录账号</button><div class="empty-footer">真实数据 · 加密存储 · 无需共享密码</div></div>
+      <div class="bottom-note">◈ 套餐周期结束不一定代表账号失效；额外购买的额度与周期额度分开显示。</div>
+    </section>
+    <section id="alerts" hidden><div class="panel-title"><h2>预警中心</h2><p>当前额度和套餐周期提醒，异常数据不作为正常用量。</p></div><div id="alert-list"></div></section>
+    <section id="settings" hidden><form id="settings-form" class="settings-panel"><h2>监控与提醒</h2><p>客户端运行或在托盘常驻时，自动刷新并提醒。</p><label>刷新间隔（秒）<input name="interval" type="number" min="60" max="3600" required></label><label>用量预警（%）<input name="warning" type="number" min="1" max="99" required></label><label>严重预警（%）<input name="critical" type="number" min="2" max="100" required></label><label>低余额提醒（美元）<input name="lowBalance" type="number" min="0" step="0.01" required></label><label class="checkbox"><input name="notifications" type="checkbox">开启桌面通知</label><div class="notice">套餐周期提醒：提前 7 天、3 天、1 天。相同提醒不重复弹出。</div><button class="primary">保存设置</button></form></section>
+  </main>
+  <dialog id="add-dialog"><form id="add-form"><div class="dialog-heading"><h2>添加 CommandCode 账号</h2><button id="close-dialog" type="button" aria-label="关闭">×</button></div><p>选择适合你的登录方式。</p><div class="tabs"><button id="password-tab" type="button" class="selected">账号密码登录</button><button id="api-tab" type="button">API Key</button></div><label>账号备注（可选）<input id="account-name" maxlength="80" placeholder="例如：主账号 / 备用账号"></label><div id="password-section"><div class="login-illustration">↗</div><h3>在官方页面输入邮箱和密码</h3><p>将打开独立的官方登录窗口。登录并授权后自动添加账号，无需手动复制 Key。</p><small>密码仅输入到 commandcode.ai 页面，本客户端不保存密码。</small></div><div id="api-section" hidden><label>API Key<input id="api-key" type="password" autocomplete="off" placeholder="粘贴此账号的 API Key"></label><p>验证账号身份后加密保存。Key 不会显示在账号列表中。</p></div><p id="add-error" class="error" role="alert"></p><button id="submit-add" class="primary full">打开官方登录窗口</button></form></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>

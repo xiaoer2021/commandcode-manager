@@ -1,0 +1,26 @@
+{
+  "name": "commandcode-account-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CommandCode 多账号用量与切换客户端",
+  "author": "Local Workspace",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "powershell -NoProfile -Command \"& '.\\desktop\\CommandCode Manager.exe'\"",
+    "start:legacy": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File modern/update.ps1",
+    "build:legacy": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.commandcode.manager",
+    "productName": "CommandCode Manager",
+    "files": ["main.cjs", "preload.cjs", "lib/**", "ui/**", "package.json"],
+    "win": { "target": "portable", "signAndEditExecutable": false },
+    "directories": { "output": "release" }
+  }
+}

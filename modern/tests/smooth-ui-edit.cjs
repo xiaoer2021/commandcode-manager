@@ -1,0 +1,11 @@
+const fs=require('fs');const p='modern/ui/src/main.tsx';let s=fs.readFileSync(p,'utf8');
+s=s.replace('useMemo, useLayoutEffect','useMemo, useLayoutEffect, useCallback, startTransition');
+s=s.replace('setState(m.state);setSelected(current=>current?m.state.accounts.find(a=>a.id===current.id)||current:current)', "startTransition(()=>{setState(previous=>{const old=new Map(previous.accounts.map(a=>[a.id,a]));return {...m.state,accounts:m.state.accounts.map(a=>{const before=old.get(a.id);return before&&JSON.stringify(before)===JSON.stringify(a)?before:a})}});setSelected(current=>current?m.state.accounts.find(a=>a.id===current.id)||current:current)})");
+const handles=`const rowSwitch=useCallback((a:Account)=>{request('switch',{id:a.id}).then(r=>{if(r.message)setToast(r.message)}).catch(e=>setToast(e.message))},[]);
+const rowPanel=useCallback((a:Account,enabled:boolean)=>{request('officialUsage',{accountId:a.id,enabled}).then(r=>setToast(r.message||'已保存')).catch(e=>setToast(e.message))},[]);
+const rowOpen=useCallback((a:Account)=>{const view=historyViewRef.current;const local=historyLocalRef.current.get(a.id+'|'+view.grain+'|0|'+view.start+'|'+view.end);setHistory(local?.rows||[]);setHistoryAt(local?.at);setHistoryError(local?.error||'');setHistoryLoading(!local?.rows.some(row=>num(row.Tokens)));setHistoryUpdating(local?.updating||false);setHistoryPage(0);setHistoryRefresh(0);setSelected(a);setName(a.name);setRenaming(false);setError('');setModal('usage')},[]);
+useEffect(()=>{if(!accountTools)return;const close=(e:PointerEvent)=>{if(!(e.target as Element).closest('.account-tools'))setAccountTools(false)};document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close)},[accountTools]);
+`;
+s=s.replace("useEffect(()=>{const listener=(event:{data:Reply})",handles+"useEffect(()=>{const listener=(event:{data:Reply})");
+s=s.replace("onSwitch={a=>act('switch',{id:a.id}).catch(()=>{})} onOpen={a=>{setHistoryPage(0);setHistoryRefresh(0);show(a,'usage')}} onPanel={(a,enabled)=>act('officialUsage',{accountId:a.id,enabled}).then(r=>setToast(r.message||'已保存')).catch(()=>{})}", 'onSwitch={rowSwitch} onOpen={rowOpen} onPanel={rowPanel}');
+fs.writeFileSync(p,s);

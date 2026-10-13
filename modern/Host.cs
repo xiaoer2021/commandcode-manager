@@ -1,0 +1,412 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.IO.Pipes;
+using System.Linq;
+using System.Net;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+using System.Windows.Forms;
+using CommandCodeManager;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+namespace ModernHost {
+public class DomainRunner : MarshalByRefObject, FixedContract.IRunner {
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    public override object InitializeLifetimeService() { return null; }
+    public bool Run(string[] args) {
+        try { SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { }
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; ServicePointManager.DefaultConnectionLimit = 8; Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+        bool hot = args.Contains("--verify-hot"), test = args.Contains("--verify") || hot, live = args.Contains("--verify-live"); bool owner;
+        using (Mutex mutex = new Mutex(true, test || live ? "Local\\CommandCodeModernVerify" : "Local\\CommandCodeModernHost", out owner)) {
+            if (!owner) { try { using (NamedPipeClientStream pipe = new NamedPipeClientStream(".", "CommandCodeManagerControl", PipeDirection.Out)) { pipe.Connect(1000); using (StreamWriter writer = new StreamWriter(pipe)) { writer.WriteLine("show"); writer.Flush(); } } } catch { } return false; }
+            using (DesktopForm form = new DesktopForm(test, live, hot)) { Application.Run(form); if(hot)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),"loop ended: "+form.Restart+Environment.NewLine); return form.Restart; }
+        }
+    }
+}
+public class DesktopForm : Form {
+    private readonly string appDir = Path.GetDirectoryName(typeof(DesktopForm).Assembly.Location);
+    private readonly string deployedDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui");
+    private readonly string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "commandcode-account-manager", "accounts-native.json");
+    private readonly string authFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".commandcode", "auth.json");
+    private readonly Dictionary<string, string> keys = new Dictionary<string, string>();
+    private readonly object gate = new object();
+    private readonly NotifyIcon tray = new NotifyIcon();
+    private readonly System.Windows.Forms.Timer refreshTimer = new System.Windows.Forms.Timer(), reloadTimer = new System.Windows.Forms.Timer();
+    private WebView2 view;
+    private CoreWebView2Environment environment;
+    private FileSystemWatcher watcher;
+    private FileSystemWatcher authWatcher;
+    private Store store;
+    private bool busy, quitting, initializing, ready, verifying, liveVerify, hotVerify;
+    private int navigations;
+    private int completed;
+    private string activeId;
+    private LoginFlow login;
+    private readonly HashSet<string> refreshingAccounts=new HashSet<string>();
+    private string importFile;
+    private bool transferBusy;
+    private bool refreshPaused = false;
+    private string officialSignature;
+    private readonly TokenHistoryCache historyCache;
+    private readonly Dictionary<string,List<HistoryQuery>> pendingHistory=new Dictionary<string,List<HistoryQuery>>();
+    private readonly HashSet<string> queuedHistory=new HashSet<string>(),runningHistory=new HashSet<string>();
+    private readonly HashSet<string> switching = new HashSet<string>();
+    public bool Restart;
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool SetDllDirectory(string path);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+    public DesktopForm(bool test, bool live, bool hot) {
+        verifying = test; liveVerify = live; hotVerify = hot;
+        SetDllDirectory(AppDomain.CurrentDomain.BaseDirectory);
+        Text = "CommandCode Manager"; ClientSize = new Size(1240, 740); MinimumSize = new Size(1100, 680); StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(220, 230, 243); Font = new Font("Microsoft YaHei UI", 9); AutoScaleMode = AutoScaleMode.None;
+        FormBorderStyle = FormBorderStyle.None; Padding = new Padding(0); MaximizedBounds = Screen.FromControl(this).WorkingArea;
+        double dpiScale = GetDpiForWindow(Handle) / 96.0; Rectangle desktopArea = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min((int)(1100 * dpiScale), desktopArea.Width - 32), Math.Min((int)(680 * dpiScale), desktopArea.Height - 40));
+        ClientSize = new Size(Math.Min((int)(1240 * dpiScale), desktopArea.Width - 40), Math.Min((int)(740 * dpiScale), desktopArea.Height - 90));
+        try { int corner = 2; DwmSetWindowAttribute(Handle, 33, ref corner, sizeof(int)); int borderColor = unchecked((int)0xFFFFFFFE); DwmSetWindowAttribute(Handle, 34, ref borderColor, sizeof(int)); } catch (DllNotFoundException) { }
+        if (test) { file = Path.Combine(Path.GetTempPath(), "commandcode-react-test-" + Guid.NewGuid().ToString("N"), "accounts.json"); store = new Store(); Seed(); }
+        else { store = File.Exists(file) ? new JavaScriptSerializer {MaxJsonLength=8388608}.Deserialize<Store>(File.ReadAllText(file)) : new Store(); if (store == null || store.Accounts == null || store.Settings == null) throw new InvalidOperationException("账号数据格式异常，原文件已保留"); }
+        historyCache=new TokenHistoryCache(Path.Combine(Path.GetDirectoryName(file),"usage-history.json"));
+        foreach (Account account in store.Accounts) { try { keys[account.Id] = Core.Decrypt(account.Secret); } catch { account.Error = "凭据无法解密，请用原 Windows 用户或重新登录"; } }
+        if (!test && !live && store.Settings.OfficialUsagePanel) { IdentifyActive(); Account migrated = store.Accounts.FirstOrDefault(a => a.Id == activeId); if (migrated != null) migrated.OfficialUsagePanel = true; store.Settings.OfficialUsagePanel = false; Save(); }
+        if (!test) IdentifyActive();
+        if (!test && !live && (store.Accounts.Any(a=>a.OfficialUsagePanel) || OfficialUsage.IsInstalled())) { try { InstallOfficial(); } catch { } }
+        using(Stream logo=typeof(DesktopForm).Assembly.GetManifestResourceStream("CommandCodeManager.Icon")) { if(logo!=null) using(Icon embedded=new Icon(logo,new Size(64,64))) Icon=(Icon)embedded.Clone(); }
+        tray.Icon = Icon ?? SystemIcons.Application; tray.Text = "CommandCode Manager"; tray.Visible = !test && !live;
+        ContextMenuStrip menu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9), ShowImageMargin = false }; menu.Opening += (s,e) => BuildTrayMenu(menu); tray.ContextMenuStrip = menu; BuildTrayMenu(menu); tray.DoubleClick += async (s, e) => await ShowWindow(); tray.BalloonTipClicked += async (s, e) => await ShowWindow();
+        refreshTimer.Tick += async (s, e) => await RefreshAll(); Schedule();
+        reloadTimer.Interval = 500; reloadTimer.Tick += (s, e) => { if (busy || login != null || switching.Count > 0) return; reloadTimer.Stop(); if (ready && view != null) view.CoreWebView2.Reload(); };
+        if (Directory.Exists(deployedDir)) { watcher = new FileSystemWatcher(deployedDir, "version.txt"); watcher.Changed += (s, e) => BeginInvoke(new Action(() => { reloadTimer.Stop(); reloadTimer.Start(); })); watcher.EnableRaisingEvents = true; }
+        if (!test && !live && Directory.Exists(Path.GetDirectoryName(authFile))) {
+            authWatcher = new FileSystemWatcher(Path.GetDirectoryName(authFile), "auth.json");
+            FileSystemEventHandler authChanged = (s,e) => { if (quitting || IsDisposed) return; try { BeginInvoke(new Action(() => { if (!quitting) { IdentifyActive(); Push(); } })); } catch (InvalidOperationException) { } };
+            authWatcher.Changed += authChanged; authWatcher.Created += authChanged; authWatcher.Deleted += authChanged; authWatcher.Renamed += (s,e) => authChanged(s,e); authWatcher.EnableRaisingEvents = true;
+        }
+        Shown += async (s, e) => { await InitView(); if (!test) await RefreshAll(); };
+        Activated += (s, e) => { if (!verifying) IdentifyActive(); Push(); };
+        FormClosing += (s, e) => {
+            if (!quitting && !verifying && !liveVerify) { e.Cancel = true; Hide(); DisposeView(); }
+            else { refreshTimer.Stop(); reloadTimer.Stop(); if (login != null) login.Dispose(); if (watcher != null) watcher.Dispose(); if (authWatcher != null) authWatcher.Dispose(); DisposeView(); tray.Dispose(); }
+        };
+        if ((!test && !live) || hot) Task.Run(() => ControlServer());
+    }
+    private async Task ControlServer() {
+        try {
+            while (!quitting) {
+                PipeSecurity security = new PipeSecurity(); security.SetAccessRuleProtection(true, false); security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User, PipeAccessRights.FullControl, AccessControlType.Allow));
+                using (NamedPipeServerStream pipe = new NamedPipeServerStream(hotVerify ? "CommandCodeManagerVerifyControl" : "CommandCodeManagerControl", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 4096, 4096, security)) {
+                    await pipe.WaitForConnectionAsync(); string command = await new StreamReader(pipe).ReadLineAsync(); if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),"command: ["+command+"]"+Environment.NewLine);
+                    if (command == "show") BeginInvoke(new Action(async () => await ShowWindow()));
+                    if (command == "hide") BeginInvoke(new Action(() => { Hide(); DisposeView(); }));
+                    if (command == "quit") { BeginInvoke(new Action(() => { quitting = true; Close(); })); return; }
+                    if (command == "update") { while (busy || switching.Count > 0 || login != null) await Task.Delay(250); BeginInvoke(new Action(() => { if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),"closing for update"+Environment.NewLine); Restart = true; quitting = true; Close(); })); return; }
+                }
+            }
+        } catch (Exception error) { if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),error.ToString()+Environment.NewLine); }
+    }
+    private async Task ShowWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); await InitView(); Push(); }
+    private ToolStripMenuItem TrayAction(string text, Func<Task> action, bool enabled = true) {
+        ToolStripMenuItem item = new ToolStripMenuItem(text) { Enabled = enabled };
+        item.Click += async (s,e) => { try { await action(); } catch(Exception error) { tray.BalloonTipTitle="CommandCode Manager"; tray.BalloonTipText=error.Message; tray.ShowBalloonTip(5000); } };
+        return item;
+    }
+    private void BuildTrayMenu(ContextMenuStrip menu) {
+        while(menu.Items.Count>0) { ToolStripItem old=menu.Items[0]; menu.Items.RemoveAt(0); old.Dispose(); }
+        Account current=store.Accounts.FirstOrDefault(a=>a.Id==activeId);
+        menu.Items.Add(new ToolStripMenuItem("当前账号："+(current==null?"未匹配":current.Name)) { Enabled=false });
+        AccountData quota=current==null?null:current.Data;
+        menu.Items.Add(new ToolStripMenuItem("剩余额度："+(quota==null?"暂无数据":Core.Money(quota.Remaining))));
+        menu.Items.Add(new ToolStripMenuItem("订阅周期已用："+(quota==null?"暂无数据":Core.Money(quota.MonthlyUsed)+" / "+Core.Money(quota.MonthlyTotal))));
+        menu.Items.Add(new ToolStripMenuItem("5 小时已用："+TrayWindowQuota(quota==null?null:quota.FiveHour,quota)));
+        menu.Items.Add(new ToolStripMenuItem("每周已用："+TrayWindowQuota(quota==null?null:quota.Weekly,quota)));
+        if(current!=null&&!string.IsNullOrEmpty(current.Error))menu.Items.Add(new ToolStripMenuItem("同步异常，以上为最近记录"));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(TrayAction("刷新当前账号",()=>RefreshOne(current,new HistoryQuery{Grain="day",Page=0}),current!=null&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
+        menu.Items.Add(TrayAction("刷新并检测全部账号",RefreshAll,store.Accounts.Count>0&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
+        ToolStripMenuItem accounts=new ToolStripMenuItem("快速切换账号");
+        foreach(Account account in store.Accounts) {
+            Account target=account; ToolStripMenuItem item=TrayAction(target.Name+" · "+Core.CredentialLabel(target.CredentialState),async()=>{await SwitchAccount(target);tray.BalloonTipTitle="账号已切换";tray.BalloonTipText=target.Name+"，新开的 CommandCode 会话生效";tray.ShowBalloonTip(3000);},target.Id!=activeId&&target.CredentialState!="invalid"&&target.Data!=null&&!transferBusy&&switching.Count==0&&string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")));
+            item.Checked=target.Id==activeId;accounts.DropDownItems.Add(item);
+        }
+        accounts.Enabled=store.Accounts.Count>0;menu.Items.Add(accounts);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(TrayAction("彻底退出",()=>{quitting=true;Close();return Task.FromResult(0);}));
+    }
+    private static string TrayWindowQuota(WindowUsage window,AccountData data) {
+        if(data!=null&&data.Limited==false)return "不限窗口";
+        if(window==null)return "暂无数据";
+        return Core.Money(window.Used)+" / "+Core.Money(window.Cap);
+    }
+    private async Task SwitchAccount(Account account) {
+        if(!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")))throw new InvalidOperationException("环境变量覆盖登录配置，请清除 COMMAND_CODE_API_KEY 后再切换");
+        if(transferBusy||switching.Count>0)throw new InvalidOperationException("账号操作正在进行，请稍后重试");
+        switching.Add(account.Id);Push();
+        try { string key=keys[account.Id];Dictionary<string,object> identity=await Task.Run(()=>Core.Get(key,"/alpha/whoami","limits=1"));string userId=Core.Text(Core.Object(Core.Value(identity,"user")),"id"),org=Core.Text(Core.Object(Core.Value(identity,"org")),"id");if(account.Data==null||userId!=account.Data.UserId||org!=account.Data.OrgId)throw new InvalidOperationException("账号或组织身份变化，已停止切换");Core.Switch(authFile,key,account.Data);activeId=account.Id;SyncOfficial(); }
+        finally {switching.Remove(account.Id);Push();}
+    }
+    protected override CreateParams CreateParams { get { CreateParams parameters = base.CreateParams; parameters.Style = (parameters.Style | 0x40000 | 0x10000 | 0x20000 | 0x80000) & ~0xC00000; return parameters; } }
+    protected override void WndProc(ref Message message) {
+        if (message.Msg == 0x83 && message.WParam != IntPtr.Zero) { message.Result = IntPtr.Zero; return; }
+        base.WndProc(ref message);
+        if (message.Msg == 0x84 && WindowState == FormWindowState.Normal && message.Result == new IntPtr(1)) { long position = message.LParam.ToInt64(); Point p = PointToClient(new Point((short)(position & 65535), (short)((position >> 16) & 65535))); int border = 7; int hit = p.X < border ? p.Y < border ? 13 : p.Y >= Height-border ? 16 : 10 : p.X >= Width-border ? p.Y < border ? 14 : p.Y >= Height-border ? 17 : 11 : p.Y < border ? 12 : p.Y >= Height-border ? 15 : 1; message.Result = new IntPtr(hit); }
+    }
+    private void DisposeView() { ready = false; if (view != null) { Controls.Remove(view); view.Dispose(); view = null; } }
+    private async Task InitView() {
+        if (view != null || initializing) return; initializing = true;
+        try {
+            view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(220, 230, 243) }; Controls.Add(view);
+            string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CommandCodeManager", verifying || liveVerify ? "webview-verify" : "webview");
+            if (environment == null) environment = await CoreWebView2Environment.CreateAsync(null, profile, new CoreWebView2EnvironmentOptions("--disable-background-networking --disable-component-update"));
+            await view.EnsureCoreWebView2Async(environment);
+            view.ZoomFactor = 1;
+            view.CoreWebView2.SetVirtualHostNameToFolderMapping("commandcode.local", deployedDir, CoreWebView2HostResourceAccessKind.DenyCors);
+            view.CoreWebView2.Settings.AreDevToolsEnabled = verifying || liveVerify; view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false; view.CoreWebView2.Settings.IsStatusBarEnabled = false; view.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            view.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = true;
+            view.CoreWebView2.NavigationStarting += (s, e) => { if (!e.Uri.StartsWith("https://commandcode.local/", StringComparison.OrdinalIgnoreCase)) e.Cancel = true; };
+            view.CoreWebView2.NewWindowRequested += (s, e) => e.Handled = true;
+            view.CoreWebView2.WebMessageReceived += async (s, e) => await Message(e);
+            view.CoreWebView2.NavigationCompleted += async (s, e) => { ready = e.IsSuccess; if (ready) { navigations++; Push(); if (hotVerify) { string output = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification"); Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, "hot-ready.json"), new JavaScriptSerializer().Serialize(new { pid = Process.GetCurrentProcess().Id, domain = AppDomain.CurrentDomain.Id, ready = true, navigations = navigations })); } else if (verifying || liveVerify) await Verify(); } };
+            view.CoreWebView2.Navigate("https://commandcode.local/index.html");
+        } catch (Exception e) { if (verifying || liveVerify) { Directory.CreateDirectory(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification")); File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification", "startup-error.txt"), e.ToString()); quitting = true; Close(); } else { MessageBox.Show(e is WebView2RuntimeNotFoundException ? "此电脑缺少 Microsoft Edge WebView2 运行环境，请按使用说明安装后重新打开程序。" : "界面加载失败：" + e.Message, "CommandCode Manager"); quitting=true;Close(); } }
+        finally { initializing = false; }
+    }
+    private object State() {
+        lock (gate) return new { accounts = store.Accounts.Select(a => new { id = a.Id, name = a.Name, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId, switching = switching.Contains(a.Id), plan = Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, DateTimeOffset.UtcNow).Select(value => value.Text).ToArray() }).ToArray(), refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) };
+    }
+    private void Send(object message) { if (ready && view != null) view.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(message)); }
+    private void Push() { Send(new { kind = "state", state = State() }); }
+    private void Save() { if (verifying || liveVerify) return; lock (gate) Core.AtomicWrite(file, new JavaScriptSerializer {MaxJsonLength=8388608}.Serialize(store)); }
+    private void SyncOfficial() {
+        if (verifying || liveVerify) return;
+        Account active = store.Accounts.FirstOrDefault(a => a.Id == activeId); bool enabled = active != null && active.OfficialUsagePanel; string userId = enabled && active.Data != null ? active.Data.UserId + "|" + active.Data.OrgId : ""; string signature = enabled + "|" + userId;
+        if (signature != officialSignature) { OfficialUsage.WriteState(enabled, userId); officialSignature = signature; }
+    }
+    private void InstallOfficial() {
+        Account active = store.Accounts.FirstOrDefault(a => a.Id == activeId); bool enabled = active != null && active.OfficialUsagePanel;
+        OfficialUsage.Apply(store.Accounts.Any(a=>a.OfficialUsagePanel), Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "addons"), enabled, enabled && active.Data != null ? active.Data.UserId + "|" + active.Data.OrgId : ""); officialSignature = null; SyncOfficial();
+    }
+    private void IdentifyActive() {
+        activeId = null;
+        try { if (File.Exists(authFile)) { string key = Core.Text(new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(authFile)), "apiKey"); activeId = keys.Where(pair => pair.Value == key).Select(pair => pair.Key).FirstOrDefault(); } } catch { }
+        SyncOfficial();
+    }
+    private void Schedule() { refreshTimer.Stop(); refreshTimer.Interval = Math.Max(60, Math.Min(3600, store.Settings.Interval)) * 1000; if (store.Accounts.Count > 0 && !verifying && !liveVerify && !refreshPaused) refreshTimer.Start(); }
+    private static string HistoryJob(string accountId,HistoryQuery query) { return accountId+"|"+query.Grain+"|"+query.Page+"|"+query.Start+"|"+query.End; }
+    private void EnqueueHistory(Account account,HistoryQuery query) {
+        if(account==null||verifying||liveVerify||quitting||!queuedHistory.Add(HistoryJob(account.Id,query))) return;
+        List<HistoryQuery> pending; if(!pendingHistory.TryGetValue(account.Id,out pending)) pendingHistory[account.Id]=pending=new List<HistoryQuery>(); pending.Add(query);
+    }
+    private void WarmHistory(Account account) {
+        foreach(string grain in new string[]{"day","week","month"}) EnqueueHistory(account,new HistoryQuery{Grain=grain,Page=0});
+        StartHistory(account);
+    }
+    private void QueueHistory(Account account,string grain,int page,bool force=false) { EnqueueHistory(account,new HistoryQuery{Grain=grain,Page=page,Force=force}); StartHistory(account); }
+    private void QueueHistory(Account account,HistoryQuery query) {EnqueueHistory(account,query);StartHistory(account);}
+    private void StartHistory(Account account) {
+        if(account==null||verifying||liveVerify||quitting||!pendingHistory.ContainsKey(account.Id)||!runningHistory.Add(account.Id)) return;
+        Push(); ProcessHistory(account);
+    }
+    private async void ProcessHistory(Account account) {
+        try {
+            List<HistoryQuery> pending;
+            while(!quitting&&pendingHistory.TryGetValue(account.Id,out pending)&&pending.Count>0) {
+                HistoryQuery[] batch=pending.ToArray(); pending.Clear(); HistoryWindow[] results=null; string error=null;
+                try {
+                    string key; lock(gate) keys.TryGetValue(account.Id,out key); if(key==null) throw new InvalidOperationException("账号已移除或凭据无法解密");
+                    string org=account.Data==null?"":account.Data.OrgId;
+                    results=await Task.Run(()=>historyCache.Refresh(account.Id,key,org,batch,DateTimeOffset.UtcNow));
+                } catch(Exception e) { error=e.Message; }
+                foreach(HistoryQuery query in batch) queuedHistory.Remove(HistoryJob(account.Id,query));
+                if(quitting) break;
+                if(!store.Accounts.Contains(account)) { try { historyCache.Remove(account.Id); } catch { } break; }
+                if(results==null) results=batch.Select(q=>historyCache.Read(account.Id,q,DateTimeOffset.UtcNow)).ToArray();
+                foreach(HistoryWindow result in results) SendHistory(result,error??result.Error,false);
+            }
+        } catch(Exception e) {
+            List<HistoryQuery> abandoned; if(pendingHistory.TryGetValue(account.Id,out abandoned)) { foreach(HistoryQuery q in abandoned) queuedHistory.Remove(HistoryJob(account.Id,q)); abandoned.Clear(); }
+            Send(new {kind="historyError",accountId=account.Id,error=e.Message});
+        } finally { runningHistory.Remove(account.Id); pendingHistory.Remove(account.Id); if(!quitting) Push(); }
+    }
+    private void SendHistory(HistoryWindow window,string error,bool updating) { Send(new {kind="history",accountId=window.AccountId,grain=window.Grain,page=window.Page,start=window.Start,end=window.End,pages=window.Pages,hasNext=window.HasNext,history=window.Rows,historyAt=window.UpdatedAt,historyError=error,updating=updating}); }
+    private HistoryQuery Query(Dictionary<string,object> payload) {HistoryQuery q=new HistoryQuery{Grain=Core.Text(payload,"grain"),Page=(int)(Core.Number(payload,"page")??0),Start=Core.Text(payload,"start"),End=Core.Text(payload,"end"),Force=Core.Boolean(payload,"refresh")==true};int pages;TokenHistoryCache.Dates(q,DateTimeOffset.UtcNow,out pages);return q;}
+    private async Task UpdateAccount(Account account) {
+        string key;lock(gate)keys.TryGetValue(account.Id,out key);
+        try {
+            if(key==null)throw new InvalidOperationException("凭据无法解密，请重新导入账号");
+            AccountData data=await Task.Run(()=>Core.Fetch(key));AccountData old=account.Data;
+            bool same=old!=null&&old.UserId==data.UserId&&old.OrgId==data.OrgId;
+            if(old!=null&&!same&&!verifying&&!liveVerify)historyCache.Remove(account.Id);
+            if(same&&!data.TotalTokens.HasValue&&!string.IsNullOrEmpty(data.TokenError)){data.TotalTokens=old.TotalTokens;data.InputTokens=old.InputTokens;data.OutputTokens=old.OutputTokens;}
+            lock(gate){account.Data=data;account.Error=null;account.CredentialState=(data.Error??"").Contains("访问权限")||(data.TokenError??"").Contains("访问权限")?"limited":"valid";account.CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o");account.CredentialMessage=string.IsNullOrEmpty(data.Error)?"账号凭据验证通过":data.Error;}
+            Notify(account);
+        } catch(Exception e) {lock(gate){account.Error=e.Message;account.CredentialState=Core.CredentialFailure(e);account.CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o");account.CredentialMessage=e.Message;}throw;}
+    }
+    private async Task RefreshOne(Account account,HistoryQuery query) {
+        if(busy||!refreshingAccounts.Add(account.Id))throw new InvalidOperationException("账号正在刷新，请稍后重试");Push();
+        try {await UpdateAccount(account);Save();query.Force=true;EnqueueHistory(account,query);WarmHistory(account);}
+        finally {refreshingAccounts.Remove(account.Id);Save();Push();}
+    }
+    private async Task RefreshAll() {
+        if (busy || refreshingAccounts.Count>0 || store.Accounts.Count == 0) return; IdentifyActive(); busy = true; completed = 0; Push();
+        try {
+            using (SemaphoreSlim slots = new SemaphoreSlim(2)) {
+                Account[] accounts; lock (gate) accounts = store.Accounts.ToArray();
+                await Task.WhenAll(accounts.Select(async account => {
+                    await slots.WaitAsync();
+                    try {await UpdateAccount(account);}
+                    catch { }
+                    finally { slots.Release(); completed++; Push(); }
+                }));
+            }
+            Save(); foreach(Account account in store.Accounts.ToArray()) if(account.Data!=null&&string.IsNullOrEmpty(account.Error)) WarmHistory(account);
+        } finally { busy = false; Push(); }
+    }
+    private void Notify(Account account) {
+        List<Alert> alerts = Core.Alerts(account, store.Settings, DateTimeOffset.UtcNow); List<Alert> fresh = alerts.Where(value => account.AlertIds == null || !account.AlertIds.Contains(value.Id)).ToList(); account.AlertIds = alerts.Select(value => value.Id).ToList();
+        if (fresh.Count > 0 && store.Settings.Notifications && !verifying && !liveVerify) { tray.BalloonTipTitle = "CommandCode · " + account.Name; tray.BalloonTipText = string.Join("；", fresh.Select(value => value.Text)); tray.ShowBalloonTip(5000); }
+    }
+    private Account Find(string id) { Account result = store.Accounts.FirstOrDefault(a => a.Id == id); if (result == null) throw new InvalidOperationException("账号不存在"); return result; }
+    private async Task Add(string key, string name, string method) {
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 8192 || key.Contains("\n") || key.Contains("\r")) throw new InvalidOperationException("请填写有效 API Key"); key = key.Trim(); AccountData data = await Task.Run(() => Core.Fetch(key));
+        lock (gate) {
+            if (store.Accounts.Any(a => a.Data != null && a.Data.UserId == data.UserId && a.Data.OrgId == data.OrgId)) throw new InvalidOperationException("这个账号已添加");
+            Account account = new Account { Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? data.Email : name.Substring(0, Math.Min(name.Length, 80)), Secret = Core.Encrypt(key), Data = data, Method = method,CredentialState="valid",CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o") }; keys[account.Id] = key; store.Accounts.Add(account); Notify(account);
+        }
+        Save(); Schedule(); Push(); WarmHistory(store.Accounts.FirstOrDefault(a=>a.Data!=null&&a.Data.UserId==data.UserId&&a.Data.OrgId==data.OrgId));
+    }
+    private async Task<string> ExportAccounts(Dictionary<string,object> payload) {
+        if(transferBusy)throw new InvalidOperationException("账号包操作正在进行");
+        var values=Core.Value(payload,"accountIds") as System.Collections.IEnumerable;if(values==null||values is string)throw new InvalidOperationException("请选择需要导出的账号");
+        Account[] chosen=values.Cast<object>().Select(v=>Find(Convert.ToString(v))).Distinct().ToArray();if(chosen.Length==0)throw new InvalidOperationException("至少选择一个账号");
+        PortableAccount[] accounts=chosen.Select(a=>{string key;if(!keys.TryGetValue(a.Id,out key))throw new InvalidOperationException("无法读取 "+a.Name+" 的凭据，请取消勾选");return new PortableAccount{Name=a.Name,ApiKey=key,Method=a.Method,UserId=a.Data==null?"":a.Data.UserId,OrgId=a.Data==null?"":a.Data.OrgId,UserName=a.Data==null?"":a.Data.UserName,Email=a.Data==null?"":a.Data.Email,OfficialUsagePanel=a.OfficialUsagePanel};}).ToArray();
+        string password=Core.Text(payload,"password");if(password.Length<8)throw new InvalidOperationException("请设置至少 8 位账号包密码");
+        using(SaveFileDialog dialog=new SaveFileDialog {Title="导出加密账号包",Filter="加密账号包 (*.ccaccounts)|*.ccaccounts",DefaultExt="ccaccounts",AddExtension=true,FileName="CommandCode账号包.ccaccounts",RestoreDirectory=true}) {
+            if(dialog.ShowDialog(this)!=DialogResult.OK)return "已取消导出";if(Path.GetExtension(dialog.FileName).ToLowerInvariant()!=".ccaccounts")throw new InvalidOperationException("请保存为 .ccaccounts 账号包");
+            transferBusy=true;Push();try {string encrypted=await Task.Run(()=>AccountTransfer.Encrypt(accounts,password));Core.AtomicWrite(dialog.FileName,encrypted);return "已导出 "+accounts.Length+" 个账号，使用此文件和密码即可在其他电脑导入";} finally{transferBusy=false;Push();}
+        }
+    }
+    private async Task<string> ImportAccounts(string password) {
+        if(transferBusy||busy||refreshingAccounts.Count>0)throw new InvalidOperationException("请等待当前账号操作完成");if(string.IsNullOrEmpty(importFile))throw new InvalidOperationException("请先选择账号包文件");
+        transferBusy=true;Push();
+        try {
+            string path=importFile;PortableAccount[] imported=await Task.Run(()=>{if(new FileInfo(path).Length>5242880)throw new InvalidOperationException("账号包文件过大");return AccountTransfer.Decrypt(File.ReadAllText(path),password);});
+            List<PortableAccount> fresh=new List<PortableAccount>();HashSet<string> knownKeys=new HashSet<string>(keys.Values);HashSet<string> knownIdentity=new HashSet<string>(store.Accounts.Where(a=>a.Data!=null&&!string.IsNullOrEmpty(a.Data.UserId)).Select(a=>a.Data.UserId+"|"+a.Data.OrgId));int skipped=0;
+            foreach(PortableAccount a in imported){string key=a.ApiKey.Trim(),identity=(a.UserId??"")+"|"+(a.OrgId??"");if(knownKeys.Contains(key)||!string.IsNullOrEmpty(a.UserId)&&knownIdentity.Contains(identity)){skipped++;continue;}knownKeys.Add(key);if(!string.IsNullOrEmpty(a.UserId))knownIdentity.Add(identity);fresh.Add(a);}
+            if(store.Accounts.Count+fresh.Count>200)throw new InvalidOperationException("管理账号数量最多 200 个");
+            Account[] prepared=await Task.Run(()=>fresh.Select(a=>new Account{Id=Guid.NewGuid().ToString("N"),Name=string.IsNullOrWhiteSpace(a.Name)?string.IsNullOrWhiteSpace(a.Email)?"导入账号":a.Email:a.Name,Secret=Core.Encrypt(a.ApiKey.Trim()),Method=a.Method=="password"||a.Method=="api"?a.Method:"import",OfficialUsagePanel=a.OfficialUsagePanel,CredentialState="unknown",Data=new AccountData{UserId=a.UserId,OrgId=a.OrgId,UserName=a.UserName,Email=a.Email}}).ToArray());
+            lock(gate){for(int i=0;i<prepared.Length;i++){store.Accounts.Add(prepared[i]);keys[prepared[i].Id]=fresh[i].ApiKey.Trim();}}
+            try{Save();}catch{lock(gate){foreach(Account a in prepared){store.Accounts.Remove(a);keys.Remove(a.Id);}}throw;}
+            importFile=null;Schedule();Push();if(prepared.Length>0)BeginInvoke(new Action(async()=>{try{await RefreshAll();}catch(Exception e){Send(new{kind="notice",message="账号已导入，后台检测暂未完成："+e.Message});}}));
+            return "已导入 "+prepared.Length+" 个账号，跳过 "+skipped+" 个重复账号；正在后台检测";
+        } finally {transferBusy=false;Push();}
+    }
+    private async Task<string> ExportUsage(Account account,HistoryQuery query) {
+        DateTimeOffset now=DateTimeOffset.UtcNow;int pages;TokenHistoryCache.Dates(query,now,out pages);
+        using(SaveFileDialog dialog=new SaveFileDialog {Title="导出用量明细",Filter="CSV 文件 (*.csv)|*.csv",DefaultExt="csv",AddExtension=true,FileName="CommandCode用量-"+DateTime.Now.ToString("yyyyMMdd")+".csv",RestoreDirectory=true}) {
+            if(dialog.ShowDialog(this)!=DialogResult.OK)return "已取消导出";if(Path.GetExtension(dialog.FileName).ToLowerInvariant()!=".csv")throw new InvalidOperationException("请保存为 CSV 文件");
+            HistoryQuery[] queries=string.IsNullOrEmpty(query.Start)?new[]{query}:Enumerable.Range(0,pages).Select(p=>new HistoryQuery{Grain=query.Grain,Page=p,Start=query.Start,End=query.End}).ToArray();
+            HistoryWindow[] windows=queries.Select(q=>historyCache.Read(account.Id,q,now)).ToArray();
+            if(windows.Any(w=>!w.Complete)) {string key;if(!keys.TryGetValue(account.Id,out key))throw new InvalidOperationException("凭据无法解密，请重新导入账号");windows=await Task.Run(()=>historyCache.Refresh(account.Id,key,account.Data==null?"":account.Data.OrgId,queries,now,(done,total)=>{if(!quitting)try{BeginInvoke(new Action(()=>Send(new{kind="exportProgress",accountId=account.Id,completed=done,total=total})));}catch(InvalidOperationException){}}));}
+            if(windows.Any(w=>!w.Complete||!string.IsNullOrEmpty(w.Error)))throw new InvalidOperationException("部分明细尚未获取完整，已保留本地记录，请稍后重试");
+            Core.AtomicWrite(dialog.FileName,UsageCsv.Create(account,windows.SelectMany(w=>w.Rows).ToArray()));return "用量明细已导出，共 "+windows.Sum(w=>w.Rows.Length)+" 条";
+        }
+    }
+    private async Task Message(CoreWebView2WebMessageReceivedEventArgs e) {
+        if (!e.Source.StartsWith("https://commandcode.local/", StringComparison.OrdinalIgnoreCase)) return;
+        Dictionary<string, object> request; try { request = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(e.WebMessageAsJson); } catch { return; }
+        string id = Core.Text(request, "id"), op = Core.Text(request, "op"); Dictionary<string, object> payload = Core.Object(Core.Value(request, "payload")); string message = "";
+        try {
+            if ((verifying || liveVerify) && op != "ready" && op != "state" && op != "maximize" && op != "minimize" && op != "history") throw new InvalidOperationException("检查模式不修改真实账号");
+            switch (op) {
+                case "minimize": WindowState = FormWindowState.Minimized; break;
+                case "maximize": MaximizedBounds = Screen.FromControl(this).WorkingArea; WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; break;
+                case "closeWindow": Close(); break;
+                case "viewUpdates": Process.Start(new ProcessStartInfo("https://github.com/xiaoer2021/commandcode-manager/releases/latest") { UseShellExecute=true }); message="已打开最新发布页；下载新安装包后覆盖安装即可保留账号数据"; break;
+                case "ready": case "state": break;
+                case "refresh": await RefreshAll(); break;
+                case "detectAccounts": await RefreshAll(); message="账号检测完成："+store.Accounts.Count(value=>value.CredentialState=="valid"||value.CredentialState=="limited")+" 个可用，"+store.Accounts.Count(value=>value.CredentialState=="invalid")+" 个失效，其余状态可在账号详情查看";break;
+                case "refreshAccount": await RefreshOne(Find(Core.Text(payload,"accountId")),Query(payload));message="此账号的余额、Token 和历史正在更新";break;
+                case "exportAccounts": message=await ExportAccounts(payload);break;
+                case "chooseAccountFile": if(transferBusy)throw new InvalidOperationException("账号包操作正在进行");using(OpenFileDialog dialog=new OpenFileDialog{Title="选择加密账号包",Filter="加密账号包 (*.ccaccounts)|*.ccaccounts",CheckFileExists=true,RestoreDirectory=true}){if(dialog.ShowDialog(this)==DialogResult.OK){importFile=dialog.FileName;Send(new{kind="reply",id=id,ok=true,fileName=Path.GetFileName(importFile),state=State()});return;}}message="已取消选择";break;
+                case "importAccounts": message=await ImportAccounts(Core.Text(payload,"password"));break;
+                case "exportUsage": message=await ExportUsage(Find(Core.Text(payload,"accountId")),Query(payload));break;
+                case "add": await Add(Core.Text(payload, "key"), Core.Text(payload, "name"), "api"); break;
+                case "import": if (!File.Exists(authFile)) throw new InvalidOperationException("未发现本机登录账号"); await Add(Core.Text(new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(authFile)), "apiKey"), Core.Text(payload, "name"), "import"); break;
+                case "login":
+                    if (login != null) throw new InvalidOperationException("请先完成当前登录");
+                    using (login = new LoginFlow()) { Push(); try { Task<string> waiting = login.Wait(); Process.Start(new ProcessStartInfo(login.Url) { UseShellExecute = true }); await Add(await waiting, Core.Text(payload, "name"), "password"); } finally { login = null; Push(); } } break;
+                case "cancelLogin": if (login != null) login.Dispose(); break;
+                case "switch":
+                    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY"))) throw new InvalidOperationException("环境变量覆盖登录配置，请清除 COMMAND_CODE_API_KEY 后再切换");
+                    Account a = Find(Core.Text(payload, "id")); await SwitchAccount(a); message = "已切换为 " + a.Name + "，新开的 CommandCode 会话生效。"; break;
+                case "remove": if (busy||transferBusy||refreshingAccounts.Count>0) throw new InvalidOperationException("刷新进行中，请稍后移除"); string removeId = Core.Text(payload, "id"); Find(removeId); lock (gate) { store.Accounts.RemoveAll(value => value.Id == removeId); keys.Remove(removeId); } try { historyCache.Remove(removeId); } catch { } Save(); SyncOfficial(); Schedule(); Push(); break;
+                case "rename": Account rename = Find(Core.Text(payload, "id")); string name = Core.Text(payload, "name").Trim(); if (name == "") throw new InvalidOperationException("请填写账号备注"); rename.Name = name.Substring(0, Math.Min(name.Length, 80)); Save(); Push(); break;
+                case "settings":
+                    int interval = (int)(Core.Number(payload, "interval") ?? 0), warning = (int)(Core.Number(payload, "warning") ?? 0), critical = (int)(Core.Number(payload, "critical") ?? 0); double low = Core.Number(payload, "lowBalance") ?? -1;
+                    if (interval < 60 || interval > 3600 || warning < 1 || warning >= critical || critical > 100 || low < 0) throw new InvalidOperationException("刷新需为 60–3600 秒，预警阈值需小于严重预警");
+                    store.Settings = new Settings { Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
+                    Save(); Schedule(); Push(); break;
+                case "history":
+                    Account historyAccount=Find(Core.Text(payload,"accountId"));HistoryQuery historyQuery=Query(payload);string grain=historyQuery.Grain;int page=historyQuery.Page;DateTimeOffset historyNow=DateTimeOffset.UtcNow;int pages;DateTimeOffset[] boundaries=TokenHistoryCache.Dates(historyQuery,historyNow,out pages);
+                    if(verifying){TokenPeriod[] rows=boundaries.Take(boundaries.Length-1).Select((d,i)=>new TokenPeriod{Start=d.ToString("o"),End=boundaries[i+1].ToString("o"),Tokens=15000+i*100,Input=14000+i*100,Output=1000,Requests=5,Cost=.15}).Reverse().ToArray();Send(new{kind="reply",id=id,ok=true,accountId=historyAccount.Id,grain=grain,page=page,start=historyQuery.Start,end=historyQuery.End,pages=pages,hasNext=page+1<pages,history=rows,historyAt=historyNow.ToString("o"),updating=false,state=State()});return;}
+                    HistoryWindow local=historyCache.Read(historyAccount.Id,historyQuery,historyNow);bool update=historyQuery.Force||!local.Complete||queuedHistory.Contains(HistoryJob(historyAccount.Id,historyQuery));
+                    Send(new{kind="reply",id=id,ok=true,accountId=historyAccount.Id,grain=grain,page=page,start=historyQuery.Start,end=historyQuery.End,pages=local.Pages,hasNext=local.HasNext,history=local.Rows,historyAt=local.UpdatedAt,historyError=local.Error,updating=update,state=State()});
+                    if(update&&!liveVerify)QueueHistory(historyAccount,historyQuery);return;
+                case "officialUsage":
+                    Account panelAccount = Find(Core.Text(payload,"accountId")); bool oldPanel = panelAccount.OfficialUsagePanel; panelAccount.OfficialUsagePanel=Core.Boolean(payload,"enabled")==true;
+                    try { InstallOfficial(); Save(); } catch { panelAccount.OfficialUsagePanel=oldPanel; throw; }
+                    message=panelAccount.OfficialUsagePanel?"已开启此账号的客户端用量面板":"已关闭此账号的客户端用量面板"; Push(); break;
+                default: throw new InvalidOperationException("不支持的操作");
+            }
+            Send(new { kind = "reply", id = id, ok = true, message = message, state = State() });
+        } catch (Exception error) { Send(new { kind = "reply", id = id, ok = false, error = error.Message, state = State() }); }
+    }
+    private void Seed() {
+        for (int i = 0; i < 14; i++) store.Accounts.Add(new Account { Id = "demo-" + i, Name = new string[] { "主力研发账号", "备用编码账号", "团队协作账号" }[i % 3] + (i > 2 ? " " + (i + 1) : ""), Secret = Core.Encrypt("fixture-" + i), Method = "api", CredentialState="valid", CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o"), Data = new AccountData { UserId = "demo", Email = "demo" + i + "@example.com", Plan = "individual-goat", Status = "active", Remaining = 56.56 - i, Monthly = 56.56 - i, Purchased = 0, Free = 0, MonthlyUsed = 13.44 + i, MonthlyTotal = 70, TotalTokens = 90575648, InputTokens = 90300000, OutputTokens = 275648, PeriodTokens = 85258665, PeriodStart = "2026-10-13T06:35:41Z", PeriodEnd = "2026-11-13T06:35:41Z", FetchedAt = DateTimeOffset.UtcNow.ToString("o"), Limited = true, FiveHour = new WindowUsage { Used = 13.44, Cap = 14, ResetAt = DateTimeOffset.UtcNow.AddHours(2).ToString("o") }, Weekly = new WindowUsage { Used = 13.44, Cap = 35, ResetAt = i == 2 ? "0" : DateTimeOffset.UtcNow.AddDays(4).ToString("o") } } });
+        activeId = "demo-0";
+    }
+    private async Task Verify() {
+        try {
+            await Task.Delay(1000); if (liveVerify && busy) { while (busy) await Task.Delay(100); }
+            await view.CoreWebView2.ExecuteScriptAsync("window.__startLatencyProbe && window.__startLatencyProbe()"); await Task.Delay(1200);
+            string check = await view.CoreWebView2.ExecuteScriptAsync("window.__verifyUI ? window.__verifyUI() : {passed:false,error:'React 未加载'}");
+            string latency = await view.CoreWebView2.ExecuteScriptAsync("window.__latencyResult || null"); Dictionary<string, object> report = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(check); report["interactionLatency"] = new JavaScriptSerializer().DeserializeObject(latency); check = new JavaScriptSerializer().Serialize(report);
+            await view.CoreWebView2.ExecuteScriptAsync("window.__startHistoryLatencyProbe && window.__startHistoryLatencyProbe()"); await Task.Delay(500);
+            report["historyCacheLatency"]=new JavaScriptSerializer().DeserializeObject(await view.CoreWebView2.ExecuteScriptAsync("window.__historyLatencyResult || null")); check=new JavaScriptSerializer().Serialize(report);
+            if (verifying) {
+                BuildTrayMenu(tray.ContextMenuStrip);
+                ToolStripMenuItem quickSwitch=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(item=>item.Text=="快速切换账号");
+                bool accountMenu=quickSwitch.DropDownItems.Count==store.Accounts.Count;
+                report["trayMenu"]=new{accountMenu=accountMenu,quotaShown=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Count(item=>item.Text.Contains("已用：")||item.Text.StartsWith("剩余额度："))==4,simpleMenu=!tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text.Contains("自动刷新")||item.Text=="打开账号总览"||item.Text=="隐藏到托盘"||item.Text=="桌面预警提醒")};
+                bool topPopups = true;
+                foreach (string selector in new string[] { ".header-actions .primary", ".header-actions .settings-button", ".identity" }) {
+                    await view.CoreWebView2.ExecuteScriptAsync("document.querySelector(" + new JavaScriptSerializer().Serialize(selector) + ").click()"); await Task.Delay(80);
+                    string top = await view.CoreWebView2.ExecuteScriptAsync("(()=>{const modal=document.querySelector('.modal');return !!modal&&modal.getBoundingClientRect().top<85})()"); topPopups &= top == "true";
+                    if (selector == ".identity") { await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-modal-tabs button')[1].click()"); await Task.Delay(50); await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal .remove-button').click()"); await Task.Delay(50); topPopups &= await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal').getBoundingClientRect().top<85") == "true"; }
+                    await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal-title .icon-button').click()"); await Task.Delay(50);
+                }
+                report["popupsAtTop"] = topPopups;
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.identity').click()"); await Task.Delay(200);
+                report["tokenHistoryTable"] = new JavaScriptSerializer().DeserializeObject(await view.CoreWebView2.ExecuteScriptAsync("(()=>{const m=document.querySelector('.usage-modal');const t=document.querySelector('.history-table');return {rows:document.querySelectorAll('.history-table tbody tr').length,noModalScroll:m.scrollHeight<=m.clientHeight+1,noHorizontalScroll:t.scrollWidth<=t.clientWidth+1,noAccountSelector:!m.querySelector('select'),chineseUnits:/[万亿]/.test(m.querySelector('.token-summary').textContent),atTop:m.getBoundingClientRect().top<85}})()"));
+                string historyOutput = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification"); Directory.CreateDirectory(historyOutput); using(FileStream historyImage=File.Create(Path.Combine(historyOutput,"token-history-preview.png"))) await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,historyImage);
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal-title .icon-button').click()"); await Task.Delay(50);
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最大化或还原\"]').click()"); await Task.Delay(250); bool maximized = WindowState == FormWindowState.Maximized;
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最大化或还原\"]').click()"); await Task.Delay(250); bool restored = WindowState == FormWindowState.Normal;
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最小化\"]').click()"); await Task.Delay(150); bool minimized = WindowState == FormWindowState.Minimized; WindowState = FormWindowState.Normal; await Task.Delay(150);
+                report["windowButtonsWork"] = maximized && restored && minimized; report["nativeTitleBarRemoved"] = FormBorderStyle == FormBorderStyle.None; report["dragRegionEnabled"] = view.CoreWebView2.Settings.IsNonClientRegionSupportEnabled; check = new JavaScriptSerializer().Serialize(report);
+            }
+            string output = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification"); Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, liveVerify ? "live-result.json" : "ui-result.json"), check);
+            using (FileStream image = File.Create(Path.Combine(output, liveVerify ? "live-preview.png" : "ui-preview.png"))) await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, image);
+        } catch (Exception error) { string output = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification"); Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output, "error.txt"), error.Message); }
+        finally { quitting = true; Close(); }
+    }
+}
+}

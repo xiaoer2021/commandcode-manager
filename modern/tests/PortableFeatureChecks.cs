@@ -1,0 +1,24 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+using ModernHost;
+using CommandCodeManager;
+public static class PortableFeatureChecks {
+ private static void Check(bool ok,string message){if(!ok)throw new Exception(message);}
+ public static string Run(string root){
+ PortableAccount[] accounts={new PortableAccount{Name="测试备注",ApiKey="fixture-api-key-not-real",UserId="fixture-user",OrgId="fixture-org",UserName="fixture-name",Email="fixture@example.com",Method="password",OfficialUsagePanel=true}};
+ string pass="测试长密码-portable-2026";string encrypted=AccountTransfer.Encrypt(accounts,pass);Check(!encrypted.Contains(accounts[0].ApiKey)&&!encrypted.Contains(accounts[0].Name),"plaintext in portable file");PortableAccount[] restored=AccountTransfer.Decrypt(encrypted,pass);Check(restored[0].ApiKey==accounts[0].ApiKey&&restored[0].OfficialUsagePanel,"portable round trip failed");string local=Core.Encrypt(restored[0].ApiKey);Check(Core.Decrypt(local)==accounts[0].ApiKey,"local re-encryption failed");Check(encrypted!=AccountTransfer.Encrypt(accounts,pass),"salt or IV reused");
+ bool rejected=false;try{AccountTransfer.Decrypt(encrypted,"wrong-password-2026");}catch(InvalidOperationException){rejected=true;}Check(rejected,"wrong password accepted");
+ AccountEnvelope envelope=new JavaScriptSerializer().Deserialize<AccountEnvelope>(encrypted);byte[] cipher=Convert.FromBase64String(envelope.Ciphertext);cipher[0]^=1;envelope.Ciphertext=Convert.ToBase64String(cipher);rejected=false;try{AccountTransfer.Decrypt(new JavaScriptSerializer().Serialize(envelope),pass);}catch(InvalidOperationException){rejected=true;}Check(rejected,"tampered ciphertext accepted");
+ Check(Core.CredentialFailure(new ApiFailure(401))=="invalid","401 not invalid");Check(Core.CredentialFailure(new ApiFailure(403))=="forbidden","403 mistaken for expired");Check(Core.CredentialFailure(new InvalidOperationException("连接超时，请重试"))=="network","network mistaken for expired");
+ DateTimeOffset now=DateTimeOffset.Parse("2026-10-13T10:00:00Z");int pages;DateTimeOffset[] dates=TokenHistory.RangeBoundaries("day","2026-10-01","2026-10-13",0,now,out pages);Check(pages==2&&dates[0].ToString("yyyy-MM-dd")=="2026-10-07"&&dates.Last().ToString("yyyy-MM-dd")=="2026-10-14","day inclusive range wrong");DateTimeOffset[] older=TokenHistory.RangeBoundaries("day","2026-10-01","2026-10-13",1,now,out pages);Check(older.Last()==dates.First(),"range page overlap or gap");dates=TokenHistory.RangeBoundaries("week","2026-10-01","2026-10-13",0,now,out pages);Check(dates.Length==4&&dates[1].ToString("yyyy-MM-dd")=="2026-10-05","Monday partial week wrong");dates=TokenHistory.RangeBoundaries("month","2026-09-20","2026-10-10",0,now,out pages);Check(dates.Length==3&&dates.Last().ToString("yyyy-MM-dd")=="2026-10-11","partial month wrong");
+ rejected=false;try{TokenHistory.RangeBoundaries("day","2026-10-13","2026-10-14",0,now,out pages);}catch(InvalidOperationException){rejected=true;}Check(rejected,"future range accepted");
+ Func<string,string,DateTimeOffset,DateTimeOffset,Task<Dictionary<string,object>>> fetch=(key,org,date,time)=>{double v=Math.Max(0,(time-date).TotalSeconds);return Task.FromResult(new Dictionary<string,object>{{"totalTokens",v*10},{"totalTokensIn",v*8},{"totalTokensOut",v*2},{"totalCount",v},{"totalCost",v*.01}});};
+ TokenHistoryCache cache=new TokenHistoryCache(Path.Combine(root,"range.json"),fetch);HistoryQuery natural=new HistoryQuery{Grain="month",Page=0};cache.Refresh("account","key","org",new[]{natural},now).GetAwaiter().GetResult();double? full=cache.Read("account","month",0,now).Rows[0].Tokens;HistoryQuery partial=new HistoryQuery{Grain="month",Page=0,Start="2026-10-01",End="2026-10-10"};HistoryWindow result=cache.Refresh("account","key","org",new[]{partial},now).GetAwaiter().GetResult()[0];Check(result.Complete&&!result.HasNext&&result.Pages==1,"range cache incomplete");Check(cache.Read("account","month",0,now).Rows[0].Tokens==full,"partial range overwrote natural month");Check(new TokenHistoryCache(Path.Combine(root,"range.json"),fetch).Read("account",partial,now).Complete,"range restart cache lost");
+ Account sample=new Account{Name="=HYPERLINK(\"fixture\")",Data=new AccountData{UserName="测试用户"}};string csv=UsageCsv.Create(sample,result.Rows);Check(csv[0]=='\uFEFF'&&csv.Contains("'="),"CSV encoding or formula guard missing");Check(csv.Contains("总Token")&&!csv.Contains("ApiKey")&&!csv.Contains("fixture-api-key-not-real"),"CSV included credential");Check(!csv.Contains("万"),"CSV lost exact count precision");
+ return "PASS: portable encrypted accounts, Unicode password, random salt/IV, authenticated tamper rejection, wrong-password rejection, local re-encryption, credential classification, inclusive date ranges, gap-free paging, partial period isolation, persistent range cache, precise CSV and formula guard";
+ }
+}

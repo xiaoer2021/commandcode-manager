@@ -1,0 +1,48 @@
+const fs = require('fs');
+const assert = require('assert');
+const { JSDOM } = require('C:/Users/Administrator/.workbuddy/binaries/node/workspace/node_modules/jsdom');
+const script = fs.readFileSync(require('path').join(__dirname, '../addons/manager-credits-panel.js'), 'utf8');
+(async () => {
+  const dom = new JSDOM('<html><head></head><body></body></html>', {url:'https://localhost/',runScripts:'outside-only',pretendToBeVisual:true});
+  const w = dom.window;
+  let calls = 0;
+  let finish;
+  w.electronAPI = {accountOverview:()=>{calls++; return new Promise(resolve=>{finish=resolve});}};
+  w.__cmdManagerCreditsEnabled = false;
+  w.eval(script);
+  assert.equal(calls, 0);
+  assert.equal(w.document.querySelectorAll('#cmd-credits-panel').length, 0);
+  w.__cmdManagerCreditsController.setEnabled(true);
+  assert.equal(calls, 1);
+  w.__cmdManagerCreditsController.setEnabled(false);
+  finish({success:false,error:'fixture'});
+  await new Promise(resolve=>setImmediate(resolve));
+  const host = w.document.getElementById('cmd-credits-panel');
+  assert.equal(host.style.getPropertyValue('display'), 'none');
+  host.querySelector('[data-el="btnRefresh"]').click();
+  w.document.dispatchEvent(new w.Event('visibilitychange'));
+  assert.equal(calls, 1);
+  for (let i=0;i<3;i++) {
+    w.__cmdManagerCreditsController.setEnabled(true);
+    finish({success:false,error:'fixture'});
+    await new Promise(resolve=>setImmediate(resolve));
+    w.__cmdManagerCreditsController.setEnabled(true);
+    assert.equal(w.document.querySelectorAll('#cmd-credits-panel').length, 1);
+    w.__cmdManagerCreditsController.setEnabled(false);
+  }
+  assert.equal(calls, 4);
+  w.__cmdManagerCreditsUser = 'account-a|org-a';
+  w.__cmdManagerCreditsController.setEnabled(true);
+  finish({success:true,overview:{user:{id:'account-b',org:{id:'org-b'}}}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(host.style.getPropertyValue('display'), 'none');
+  w.__cmdManagerCreditsController.setEnabled(false);
+  w.__cmdManagerCreditsUser = 'account-b|org-b';
+  w.__cmdManagerCreditsController.setEnabled(true);
+  finish({success:true,overview:{user:{id:'account-b',org:{id:'org-b'}},credits:{monthlyCredits:10,purchasedCredits:0,freeCredits:0},subscription:{},usage:{},windowLimits:{}}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.notEqual(host.style.getPropertyValue('display'), 'none');
+  w.__cmdManagerCreditsController.setEnabled(false);
+  w.close();
+  console.log('PASS: disabled startup, pending response, disabled refresh, repeated toggles, single panel, account and org isolation');
+})().catch(e=>{console.error(e);process.exit(1);});
