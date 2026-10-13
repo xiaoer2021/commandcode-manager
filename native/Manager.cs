@@ -17,6 +17,7 @@ using System.Runtime.InteropServices;
 namespace CommandCodeManager {
 public class Settings {
     public int Interval { get; set; }
+    public int PageSize { get; set; }
     public int Warning { get; set; }
     public int Critical { get; set; }
     public double LowBalance { get; set; }
@@ -170,9 +171,12 @@ public static class Core {
         double? monthly = Number(credit, "monthlyCredits"), purchased = Number(credit, "purchasedCredits"), free = Number(credit, "freeCredits");
         return new AccountData { UserId = Text(user, "id"), UserName = Text(user, "userName"), Email = Text(user, "email"), OrgId = Text(org, "id"), Plan = Text(sub, "planId") == "" ? Text(credit, "planId") : Text(sub, "planId"), Status = Text(sub, "status"), PeriodEnd = Text(sub, "currentPeriodEnd"), Monthly = monthly, Purchased = purchased, Free = free, Remaining = monthly.HasValue || purchased.HasValue || free.HasValue ? (double?)(monthly.GetValueOrDefault() + purchased.GetValueOrDefault() + free.GetValueOrDefault()) : null, Limited = Boolean(windows, "limited"), CancelAtPeriodEnd = Boolean(sub, "cancelAtPeriodEnd"), FiveHour = Window(windows, "fiveHour"), Weekly = Window(windows, "weekly"), FetchedAt = DateTimeOffset.UtcNow.ToString("o") };
     }
-    public static async Task<AccountData> Fetch(string key) {
+    public static async Task<AccountData> Fetch(string key, Action<string> progress = null, Action<Dictionary<string,object>> checkIdentity = null) {
+        if(progress!=null)progress("正在验证账号身份…");
         Dictionary<string, object> identity = await Get(key, "/alpha/whoami", "limits=1");
         if (Text(Object(Value(identity, "user")), "id") == "") throw new InvalidOperationException("无法确认账号身份");
+        if(checkIdentity!=null)checkIdentity(identity);
+        if(progress!=null)progress("正在同步额度和订阅…");
         string org = Text(Object(Value(identity, "org")), "id");
         string query = org == "" ? "" : "orgId=" + Uri.EscapeDataString(org);
         Dictionary<string, object> credits = new Dictionary<string, object>(), subscription = new Dictionary<string, object>();
@@ -181,6 +185,7 @@ public static class Core {
         await Task.WhenAll(creditTask, subscriptionTask); credits = creditTask.Result; subscription = subscriptionTask.Result;
         AccountData data = Normalize(identity, credits, subscription);
         data.PeriodStart = Text(Object(Value(subscription, "data")), "currentPeriodStart");
+        if(progress!=null)progress("正在同步 Token 用量…");
         if (!string.IsNullOrEmpty(data.PeriodStart)) {
             Dictionary<string, object> summary = await SafeGet(key, "/alpha/usage/summary", query + (query == "" ? "" : "&") + "since=" + Uri.EscapeDataString(data.PeriodStart), "月度用量", errors);
             data.PeriodCost = Number(summary, "totalCost"); data.RequestCount = Number(summary, "totalCount");

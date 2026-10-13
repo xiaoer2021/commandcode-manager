@@ -32,6 +32,7 @@ public class DomainRunner : MarshalByRefObject, FixedContract.IRunner {
     }
 }
 public class DesktopForm : Form {
+    private sealed class AccountAlreadyExistsException : InvalidOperationException { public AccountAlreadyExistsException() : base("这个账号已添加，无需重复导入") {} }
     private readonly string appDir = Path.GetDirectoryName(typeof(DesktopForm).Assembly.Location);
     private readonly string deployedDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui");
     private readonly string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "commandcode-account-manager", "accounts-native.json");
@@ -53,6 +54,11 @@ public class DesktopForm : Form {
     private readonly HashSet<string> refreshingAccounts=new HashSet<string>();
     private string importFile;
     private bool transferBusy;
+    private bool addingAccount;
+    private bool resizePrompt;
+    private Size defaultClientSize,resizeStartSize;
+    private readonly string appVersion=ReadAppVersion();
+    private static string ReadAppVersion() { using(Stream resource=typeof(DesktopForm).Assembly.GetManifestResourceStream("CommandCodeManager.Version")) { if(resource==null)return "本地开发";using(StreamReader reader=new StreamReader(resource)){return Core.Text(new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(reader.ReadToEnd()),"version");} } }
     private bool refreshPaused = false;
     private string officialSignature;
     private readonly TokenHistoryCache historyCache;
@@ -71,6 +77,7 @@ public class DesktopForm : Form {
         double dpiScale = GetDpiForWindow(Handle) / 96.0; Rectangle desktopArea = Screen.FromControl(this).WorkingArea;
         MinimumSize = new Size(Math.Min((int)(1100 * dpiScale), desktopArea.Width - 32), Math.Min((int)(680 * dpiScale), desktopArea.Height - 40));
         ClientSize = new Size(Math.Min((int)(1240 * dpiScale), desktopArea.Width - 40), Math.Min((int)(740 * dpiScale), desktopArea.Height - 90));
+        defaultClientSize=ClientSize;
         try { int corner = 2; DwmSetWindowAttribute(Handle, 33, ref corner, sizeof(int)); int borderColor = unchecked((int)0xFFFFFFFE); DwmSetWindowAttribute(Handle, 34, ref borderColor, sizeof(int)); } catch (DllNotFoundException) { }
         if (test) { file = Path.Combine(Path.GetTempPath(), "commandcode-react-test-" + Guid.NewGuid().ToString("N"), "accounts.json"); store = new Store(); Seed(); }
         else { store = File.Exists(file) ? new JavaScriptSerializer {MaxJsonLength=8388608}.Deserialize<Store>(File.ReadAllText(file)) : new Store(); if (store == null || store.Accounts == null || store.Settings == null) throw new InvalidOperationException("账号数据格式异常，原文件已保留"); }
@@ -92,8 +99,11 @@ public class DesktopForm : Form {
         }
         Shown += async (s, e) => { await InitView(); if (!test) await RefreshAll(); };
         Activated += (s, e) => { if (!verifying) IdentifyActive(); Push(); };
+        bool wasMaximized=false;Resize+=(s,e)=>{bool maximized=WindowState==FormWindowState.Maximized;if(maximized!=wasMaximized){wasMaximized=maximized;Push();}};
+        ResizeBegin+=(s,e)=>{resizeStartSize=ClientSize;};
+        ResizeEnd+=(s,e)=>{if(ready&&WindowState==FormWindowState.Normal&&ClientSize!=resizeStartSize){resizePrompt=true;Push();}};
         FormClosing += (s, e) => {
-            if (!quitting && !verifying && !liveVerify) { e.Cancel = true; Hide(); DisposeView(); }
+            if (!quitting && !verifying && !liveVerify) { e.Cancel = true; resizePrompt=false; Hide(); DisposeView(); }
             else { refreshTimer.Stop(); reloadTimer.Stop(); if (login != null) login.Dispose(); if (watcher != null) watcher.Dispose(); if (authWatcher != null) authWatcher.Dispose(); DisposeView(); tray.Dispose(); }
         };
         if ((!test && !live) || hot) Task.Run(() => ControlServer());
@@ -107,7 +117,7 @@ public class DesktopForm : Form {
                     if (command == "show") BeginInvoke(new Action(async () => await ShowWindow()));
                     if (command == "hide") BeginInvoke(new Action(() => { Hide(); DisposeView(); }));
                     if (command == "quit") { BeginInvoke(new Action(() => { quitting = true; Close(); })); return; }
-                    if (command == "update") { while (busy || switching.Count > 0 || login != null) await Task.Delay(250); BeginInvoke(new Action(() => { if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),"closing for update"+Environment.NewLine); Restart = true; quitting = true; Close(); })); return; }
+                    if (command == "update") { while (busy || addingAccount || switching.Count > 0 || login != null) await Task.Delay(250); BeginInvoke(new Action(() => { if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),"closing for update"+Environment.NewLine); Restart = true; quitting = true; Close(); })); return; }
                 }
             }
         } catch (Exception error) { if(hotVerify)File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","control-trace.txt"),error.ToString()+Environment.NewLine); }
@@ -156,7 +166,7 @@ public class DesktopForm : Form {
     protected override void WndProc(ref Message message) {
         if (message.Msg == 0x83 && message.WParam != IntPtr.Zero) { message.Result = IntPtr.Zero; return; }
         base.WndProc(ref message);
-        if (message.Msg == 0x84 && WindowState == FormWindowState.Normal && message.Result == new IntPtr(1)) { long position = message.LParam.ToInt64(); Point p = PointToClient(new Point((short)(position & 65535), (short)((position >> 16) & 65535))); int border = 7; int hit = p.X < border ? p.Y < border ? 13 : p.Y >= Height-border ? 16 : 10 : p.X >= Width-border ? p.Y < border ? 14 : p.Y >= Height-border ? 17 : 11 : p.Y < border ? 12 : p.Y >= Height-border ? 15 : 1; message.Result = new IntPtr(hit); }
+        if (message.Msg == 0x84 && WindowState == FormWindowState.Normal && message.Result == new IntPtr(1)) { long position = message.LParam.ToInt64(); Point p = PointToClient(new Point((short)(position & 65535), (short)((position >> 16) & 65535))); int border = 7; int hit = p.X < border ? p.Y < border ? 13 : p.Y >= Height-border ? 16 : 10 : p.X >= Width-border ? p.Y < border ? 14 : p.Y >= Height-border ? 17 : 11 : p.Y < border ? 2 : p.Y >= Height-border ? 15 : 1; message.Result = new IntPtr(hit); }
     }
     private void DisposeView() { ready = false; if (view != null) { Controls.Remove(view); view.Dispose(); view = null; } }
     private async Task InitView() {
@@ -179,7 +189,7 @@ public class DesktopForm : Form {
         finally { initializing = false; }
     }
     private object State() {
-        lock (gate) return new { accounts = store.Accounts.Select(a => new { id = a.Id, name = a.Name, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId, switching = switching.Contains(a.Id), plan = Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, DateTimeOffset.UtcNow).Select(value => value.Text).ToArray() }).ToArray(), refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) };
+        lock (gate) return new { accounts = store.Accounts.Select(a => new { id = a.Id, name = a.Name, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId, switching = switching.Contains(a.Id), plan = Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, DateTimeOffset.UtcNow).Select(value => value.Text).ToArray() }).ToArray(), appVersion=appVersion, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) };
     }
     private void Send(object message) { if (ready && view != null) view.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(message)); }
     private void Push() { Send(new { kind = "state", state = State() }); }
@@ -275,12 +285,22 @@ public class DesktopForm : Form {
     }
     private Account Find(string id) { Account result = store.Accounts.FirstOrDefault(a => a.Id == id); if (result == null) throw new InvalidOperationException("账号不存在"); return result; }
     private async Task Add(string key, string name, string method) {
-        if (string.IsNullOrWhiteSpace(key) || key.Length > 8192 || key.Contains("\n") || key.Contains("\r")) throw new InvalidOperationException("请填写有效 API Key"); key = key.Trim(); AccountData data = await Task.Run(() => Core.Fetch(key));
+        if(addingAccount)throw new InvalidOperationException("账号正在添加，请稍候");
+        addingAccount=true;
+        try {
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 8192 || key.Contains("\n") || key.Contains("\r")) throw new InvalidOperationException("请填写有效 API Key"); key = key.Trim();
+        if(keys.Values.Any(value=>value==key))throw new AccountAlreadyExistsException();
+        AccountData data = await Core.Fetch(key,value=>Send(new{kind="addProgress",message=value}),identity=>{
+            string userId=Core.Text(Core.Object(Core.Value(identity,"user")),"id"),orgId=Core.Text(Core.Object(Core.Value(identity,"org")),"id");
+            if(store.Accounts.Any(account=>account.Data!=null&&account.Data.UserId==userId&&account.Data.OrgId==orgId))throw new AccountAlreadyExistsException();
+        });
+        Send(new{kind="addProgress",message="正在保存账号…"});
         lock (gate) {
-            if (store.Accounts.Any(a => a.Data != null && a.Data.UserId == data.UserId && a.Data.OrgId == data.OrgId)) throw new InvalidOperationException("这个账号已添加");
+            if (store.Accounts.Any(a => a.Data != null && a.Data.UserId == data.UserId && a.Data.OrgId == data.OrgId)) throw new AccountAlreadyExistsException();
             Account account = new Account { Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? data.Email : name.Substring(0, Math.Min(name.Length, 80)), Secret = Core.Encrypt(key), Data = data, Method = method,CredentialState="valid",CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o") }; keys[account.Id] = key; store.Accounts.Add(account); Notify(account);
         }
         Save(); Schedule(); Push(); WarmHistory(store.Accounts.FirstOrDefault(a=>a.Data!=null&&a.Data.UserId==data.UserId&&a.Data.OrgId==data.OrgId));
+        } finally {addingAccount=false;}
     }
     private async Task<string> ExportAccounts(Dictionary<string,object> payload) {
         if(transferBusy)throw new InvalidOperationException("账号包操作正在进行");
@@ -324,13 +344,16 @@ public class DesktopForm : Form {
         Dictionary<string, object> request; try { request = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(e.WebMessageAsJson); } catch { return; }
         string id = Core.Text(request, "id"), op = Core.Text(request, "op"); Dictionary<string, object> payload = Core.Object(Core.Value(request, "payload")); string message = "";
         try {
-            if ((verifying || liveVerify) && op != "ready" && op != "state" && op != "maximize" && op != "minimize" && op != "history") throw new InvalidOperationException("检查模式不修改真实账号");
+            if ((verifying || liveVerify) && op != "ready" && op != "state" && op != "maximize" && op != "minimize" && op != "history" && !(verifying&&(op=="pageSize"||op=="restoreDefaultSize"||op=="keepWindowSize"))) throw new InvalidOperationException("检查模式不修改真实账号");
             switch (op) {
                 case "minimize": WindowState = FormWindowState.Minimized; break;
                 case "maximize": MaximizedBounds = Screen.FromControl(this).WorkingArea; WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; break;
                 case "closeWindow": Close(); break;
                 case "viewUpdates": Process.Start(new ProcessStartInfo("https://github.com/xiaoer2021/commandcode-manager/releases/latest") { UseShellExecute=true }); message="已打开最新发布页；下载新安装包后覆盖安装即可保留账号数据"; break;
                 case "ready": case "state": break;
+                case "restoreDefaultSize": resizePrompt=false;WindowState=FormWindowState.Normal;ClientSize=defaultClientSize;Push();break;
+                case "keepWindowSize": resizePrompt=false;Push();break;
+                case "pageSize": int pageSize=(int)(Core.Number(payload,"value")??-1);if(!new[]{0,3,5,6,8,10}.Contains(pageSize))throw new InvalidOperationException("请选择有效的每页数量");store.Settings.PageSize=pageSize;Save();Push();break;
                 case "refresh": await RefreshAll(); break;
                 case "detectAccounts": await RefreshAll(); message="账号检测完成："+store.Accounts.Count(value=>value.CredentialState=="valid"||value.CredentialState=="limited")+" 个可用，"+store.Accounts.Count(value=>value.CredentialState=="invalid")+" 个失效，其余状态可在账号详情查看";break;
                 case "refreshAccount": await RefreshOne(Find(Core.Text(payload,"accountId")),Query(payload));message="此账号的余额、Token 和历史正在更新";break;
@@ -352,7 +375,7 @@ public class DesktopForm : Form {
                 case "settings":
                     int interval = (int)(Core.Number(payload, "interval") ?? 0), warning = (int)(Core.Number(payload, "warning") ?? 0), critical = (int)(Core.Number(payload, "critical") ?? 0); double low = Core.Number(payload, "lowBalance") ?? -1;
                     if (interval < 60 || interval > 3600 || warning < 1 || warning >= critical || critical > 100 || low < 0) throw new InvalidOperationException("刷新需为 60–3600 秒，预警阈值需小于严重预警");
-                    store.Settings = new Settings { Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
+                    store.Settings = new Settings { PageSize=store.Settings.PageSize, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
                     Save(); Schedule(); Push(); break;
                 case "history":
                     Account historyAccount=Find(Core.Text(payload,"accountId"));HistoryQuery historyQuery=Query(payload);string grain=historyQuery.Grain;int page=historyQuery.Page;DateTimeOffset historyNow=DateTimeOffset.UtcNow;int pages;DateTimeOffset[] boundaries=TokenHistoryCache.Dates(historyQuery,historyNow,out pages);
@@ -367,7 +390,8 @@ public class DesktopForm : Form {
                 default: throw new InvalidOperationException("不支持的操作");
             }
             Send(new { kind = "reply", id = id, ok = true, message = message, state = State() });
-        } catch (Exception error) { Send(new { kind = "reply", id = id, ok = false, error = error.Message, state = State() }); }
+        } catch (AccountAlreadyExistsException) { Send(new { kind="reply",id=id,ok=true,alreadyExists=true,message="账号已在列表中，无需重复添加",state=State() }); }
+        catch (Exception error) { Send(new { kind = "reply", id = id, ok = false, error = error.Message, state = State() }); }
     }
     private void Seed() {
         for (int i = 0; i < 14; i++) store.Accounts.Add(new Account { Id = "demo-" + i, Name = new string[] { "主力研发账号", "备用编码账号", "团队协作账号" }[i % 3] + (i > 2 ? " " + (i + 1) : ""), Secret = Core.Encrypt("fixture-" + i), Method = "api", CredentialState="valid", CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o"), Data = new AccountData { UserId = "demo", Email = "demo" + i + "@example.com", Plan = "individual-goat", Status = "active", Remaining = 56.56 - i, Monthly = 56.56 - i, Purchased = 0, Free = 0, MonthlyUsed = 13.44 + i, MonthlyTotal = 70, TotalTokens = 90575648, InputTokens = 90300000, OutputTokens = 275648, PeriodTokens = 85258665, PeriodStart = "2026-10-13T06:35:41Z", PeriodEnd = "2026-11-13T06:35:41Z", FetchedAt = DateTimeOffset.UtcNow.ToString("o"), Limited = true, FiveHour = new WindowUsage { Used = 13.44, Cap = 14, ResetAt = DateTimeOffset.UtcNow.AddHours(2).ToString("o") }, Weekly = new WindowUsage { Used = 13.44, Cap = 35, ResetAt = i == 2 ? "0" : DateTimeOffset.UtcNow.AddDays(4).ToString("o") } } });
@@ -382,6 +406,23 @@ public class DesktopForm : Form {
             await view.CoreWebView2.ExecuteScriptAsync("window.__startHistoryLatencyProbe && window.__startHistoryLatencyProbe()"); await Task.Delay(500);
             report["historyCacheLatency"]=new JavaScriptSerializer().DeserializeObject(await view.CoreWebView2.ExecuteScriptAsync("window.__historyLatencyResult || null")); check=new JavaScriptSerializer().Serialize(report);
             if (verifying) {
+                OnResizeBegin(EventArgs.Empty);OnResizeEnd(EventArgs.Empty);bool moveIgnored=!resizePrompt;
+                OnResizeBegin(EventArgs.Empty);ClientSize=new Size(defaultClientSize.Width-30,defaultClientSize.Height);OnResizeEnd(EventArgs.Empty);await Task.Delay(100);
+                bool resizeShown=resizePrompt&&await view.CoreWebView2.ExecuteScriptAsync("(()=>{const p=document.querySelector('.resize-prompt');return !!p&&p.getBoundingClientRect().top<85})()") == "true";
+                Size keptSize=ClientSize;await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.resize-prompt button').click()");await Task.Delay(100);bool kept=!resizePrompt&&ClientSize==keptSize;
+                OnResizeBegin(EventArgs.Empty);ClientSize=new Size(defaultClientSize.Width-20,defaultClientSize.Height);OnResizeEnd(EventArgs.Empty);await Task.Delay(100);
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.resize-prompt .primary').click()");await Task.Delay(100);bool restoredDefault=!resizePrompt&&ClientSize==defaultClientSize;
+                report["resizeNotice"]=new{shownAtTop=resizeShown,moveIgnored=moveIgnored,keepsCurrent=kept,restoresDefault=restoredDefault,versionVisible=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.footer-version').textContent") == new JavaScriptSerializer().Serialize("v"+appVersion)};
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.page-size-button').click()");await Task.Delay(80);
+                bool sizeMenuOpen=await view.CoreWebView2.ExecuteScriptAsync("!!document.querySelector('.page-size-menu')&&!document.querySelector('.page-size-control select')") == "true";
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[data-page-size=\"3\"]').click()");await Task.Delay(120);
+                bool sizeSelected=store.Settings.PageSize==3&&await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row').length===3&&!document.querySelector('.page-size-menu')") == "true";
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.page-size-button').click()");await Task.Delay(80);await view.CoreWebView2.ExecuteScriptAsync("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");await Task.Delay(50);
+                bool sizeDismissed=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.page-size-menu')") == "true";
+                report["pageSizeControl"]=new{opens=sizeMenuOpen,selects=sizeSelected,dismisses=sizeDismissed,withPager=await view.CoreWebView2.ExecuteScriptAsync("!!document.querySelector('.pagination .page-size-control')") == "true"};store.Settings.PageSize=0;Push();await Task.Delay(100);
+                Stopwatch duplicateTimer=Stopwatch.StartNew();bool duplicateBlocked=false;
+                try {await Add(keys[store.Accounts[0].Id],"重复测试","import");}catch(InvalidOperationException error){duplicateBlocked=error.Message.Contains("无需重复导入");}
+                duplicateTimer.Stop();report["duplicateImport"]=new{blockedLocally=duplicateBlocked,elapsedMs=duplicateTimer.Elapsed.TotalMilliseconds,operationUnlocked=!addingAccount};
                 BuildTrayMenu(tray.ContextMenuStrip);
                 ToolStripMenuItem quickSwitch=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(item=>item.Text=="快速切换账号");
                 bool accountMenu=quickSwitch.DropDownItems.Count==store.Accounts.Count;
@@ -398,7 +439,11 @@ public class DesktopForm : Form {
                 report["tokenHistoryTable"] = new JavaScriptSerializer().DeserializeObject(await view.CoreWebView2.ExecuteScriptAsync("(()=>{const m=document.querySelector('.usage-modal');const t=document.querySelector('.history-table');return {rows:document.querySelectorAll('.history-table tbody tr').length,noModalScroll:m.scrollHeight<=m.clientHeight+1,noHorizontalScroll:t.scrollWidth<=t.clientWidth+1,noAccountSelector:!m.querySelector('select'),chineseUnits:/[万亿]/.test(m.querySelector('.token-summary').textContent),atTop:m.getBoundingClientRect().top<85}})()"));
                 string historyOutput = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification"); Directory.CreateDirectory(historyOutput); using(FileStream historyImage=File.Create(Path.Combine(historyOutput,"token-history-preview.png"))) await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,historyImage);
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal-title .icon-button').click()"); await Task.Delay(50);
+                int normalRows=int.Parse(await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row').length"));
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最大化或还原\"]').click()"); await Task.Delay(250); bool maximized = WindowState == FormWindowState.Maximized;
+                int maximizedRows=int.Parse(await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row').length"));
+                store.Settings.PageSize=3;Push();await Task.Delay(150);bool manualRows=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row').length===3") == "true";store.Settings.PageSize=0;Push();await Task.Delay(100);
+                report["pageLayout"]=new{normalRows=normalRows,maximizedRows=maximizedRows,manualRows=manualRows,updateCentered=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const b=document.querySelector('.footer-release').getBoundingClientRect();return Math.abs((b.left+b.right)/2-innerWidth/2)<5})()") == "true"};
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最大化或还原\"]').click()"); await Task.Delay(250); bool restored = WindowState == FormWindowState.Normal;
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[aria-label=\"最小化\"]').click()"); await Task.Delay(150); bool minimized = WindowState == FormWindowState.Minimized; WindowState = FormWindowState.Normal; await Task.Delay(150);
                 report["windowButtonsWork"] = maximized && restored && minimized; report["nativeTitleBarRemoved"] = FormBorderStyle == FormBorderStyle.None; report["dragRegionEnabled"] = view.CoreWebView2.Settings.IsNonClientRegionSupportEnabled; check = new JavaScriptSerializer().Serialize(report);
