@@ -15,6 +15,9 @@ public sealed class AppUpdater {
     public int Progress;
     private string assetUrl,checksumUrl,download,expectedHash;
     private bool working;
+    public DateTimeOffset LastAttempt=DateTimeOffset.MinValue;
+    public bool AutoCheckDue(DateTimeOffset now){return !working&&Status!="ready"&&Status!="downloading"&&(now-LastAttempt).TotalMinutes>=(Status=="error"?5:15);}
+    public async Task CheckAutomatically(string current){if(AutoCheckDue(DateTimeOffset.UtcNow))await Check(current);}
     public Action Changed=delegate{};
     public static bool Newer(string candidate,string current) { Version a,b;return Version.TryParse(candidate,out a)&&Version.TryParse(current,out b)&&a>b; }
     public static bool Trusted(string url,string tag,string name) { return url=="https://github.com/xiaoer2021/commandcode-manager/releases/download/v"+tag+"/"+name; }
@@ -22,7 +25,7 @@ public sealed class AppUpdater {
     private sealed class UpdateClient : WebClient { protected override WebRequest GetWebRequest(Uri address) { var r=base.GetWebRequest(address);r.Timeout=60000;return r; } }
     private WebClient Client() { var c=new UpdateClient();c.Encoding=Encoding.UTF8;c.Headers[HttpRequestHeader.UserAgent]="CommandCode-Manager-Updater";return c; }
     public async Task Check(string current) {
-        if(working)return;working=true;Status="checking";Error="";Changed();
+        if(working||Status=="ready")return;working=true;LastAttempt=DateTimeOffset.UtcNow;Status="checking";Error="";Changed();
         try {
             string json;using(var c=Client())json=await c.DownloadStringTaskAsync("https://api.github.com/repos/xiaoer2021/commandcode-manager/releases/latest");
             var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);string tag=Convert.ToString(data["tag_name"]);

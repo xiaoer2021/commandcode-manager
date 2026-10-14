@@ -10,6 +10,14 @@ if(-not [ModernHost.AppUpdater]::Trusted($ccUrl,'1.1.0','CommandCode-Manager-Set
 if([ModernHost.AppUpdater]::Trusted($ccUrl.Replace('xiaoer2021','attacker'),'1.1.0','CommandCode-Manager-Setup-1.1.0.exe')){throw 'Wrong repository accepted'}
 if([ModernHost.AppUpdater]::Trusted($ccUrl.Replace('https:','http:'),'1.1.0','CommandCode-Manager-Setup-1.1.0.exe')){throw 'HTTP accepted'}
 $ccUpdater=New-Object ModernHost.AppUpdater
+if(-not $ccUpdater.AutoCheckDue([DateTimeOffset]::UtcNow)){throw 'Startup auto check missing'}
+$ccUpdater.LastAttempt=[DateTimeOffset]::UtcNow.AddMinutes(-6)
+if($ccUpdater.AutoCheckDue([DateTimeOffset]::UtcNow)){throw 'Successful auto check repeated too often'}
+$ccUpdater.Status='error'
+if(-not $ccUpdater.AutoCheckDue([DateTimeOffset]::UtcNow)){throw 'Failed automatic check not retried'}
+$ccUpdater.Status='ready'
+if($ccUpdater.AutoCheckDue([DateTimeOffset]::UtcNow.AddHours(2))){throw 'Downloaded installer discarded by automatic check'}
+$ccUpdater.Status='idle'
 $ccRejected=$false
 try{$ccUpdater.Install()}catch{$ccRejected=$true}
 if(-not $ccRejected){throw 'Unverified installation accepted'}
