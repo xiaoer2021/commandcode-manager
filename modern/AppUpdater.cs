@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -43,14 +43,16 @@ public sealed class AppUpdater {
             if(File.Exists(download))File.Delete(download);File.Move(download+".partial",download);Status="ready";
         }catch(Exception e){Status="available";Error="下载失败："+e.Message;}finally{working=false;Changed();}
     }
+    public static string HashCheckScript() { return "$sha=[Security.Cryptography.SHA256]::Create(); $stream=$null; try {$stream=[IO.File]::OpenRead($setup); $actual=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-',''); if(-not [string]::Equals($actual,$expected,[StringComparison]::OrdinalIgnoreCase)){throw '安装文件校验失败'}} finally {if($null -ne $stream){$stream.Dispose()}; $sha.Dispose()}"; }
     private static string Quote(string s){return "'"+s.Replace("'","''")+"'";}
     public void Install() {
         if(Status!="ready"||!File.Exists(download))throw new InvalidOperationException("请先下载更新");
         if(!VerifyFile(download,expectedHash))throw new InvalidOperationException("安装文件已改变，请重新下载更新");
         string exe=Process.GetCurrentProcess().MainModule.FileName,dir=Path.GetDirectoryName(exe);
         if(!File.Exists(Path.Combine(dir,"unins000.exe"))) {Process.Start(new ProcessStartInfo(download){UseShellExecute=true});return;}
-        string script="$ErrorActionPreference='Stop'; $targetPid="+Process.GetCurrentProcess().Id+"; $exe="+Quote(exe)+"; $setup="+Quote(download)+"; $expected="+Quote(expectedHash)+"; $ccSetupArgs="+Quote("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG /DIR=\""+dir+"\"")+"; try { Wait-Process -Id $targetPid -Timeout 60 -ErrorAction SilentlyContinue; if(Get-Process -Id $targetPid -ErrorAction SilentlyContinue){throw '程序尚未退出'}; if((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash -ne $expected){throw '安装文件校验失败'}; $p=Start-Process -FilePath $setup -ArgumentList $ccSetupArgs -Wait -PassThru; if($p.ExitCode -ne 0){throw ('安装失败，代码 '+$p.ExitCode)} } catch { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'更新未完成') | Out-Null } finally { Start-Process -FilePath $exe }";
-        Process.Start(new ProcessStartInfo("powershell.exe","-NoProfile -ExecutionPolicy Bypass -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(script))){UseShellExecute=false,CreateNoWindow=true});
+        string script="$ErrorActionPreference='Stop'; $targetPid="+Process.GetCurrentProcess().Id+"; $exe="+Quote(exe)+"; $setup="+Quote(download)+"; $expected="+Quote(expectedHash)+"; $ccSetupArgs="+Quote("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG /DIR=\""+dir+"\"")+"; try { $target=$null; try {$target=[Diagnostics.Process]::GetProcessById($targetPid)} catch [ArgumentException] {} if($null -ne $target){try {if(-not $target.WaitForExit(60000)){throw '程序尚未退出'}} finally {$target.Dispose()}}; "+HashCheckScript()+"; $info=New-Object Diagnostics.ProcessStartInfo; $info.FileName=$setup; $info.Arguments=$ccSetupArgs; $info.UseShellExecute=$false; $p=[Diagnostics.Process]::Start($info); try {$p.WaitForExit(); if($p.ExitCode -ne 0){throw ('安装失败，代码 '+$p.ExitCode)}} finally {$p.Dispose()} } catch { Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'更新未完成') } finally { [void][Diagnostics.Process]::Start($exe) }";
+        string shell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
+        Process.Start(new ProcessStartInfo(shell,"-NoProfile -ExecutionPolicy Bypass -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(script))){UseShellExecute=false,CreateNoWindow=true});
     }
 }
 }

@@ -16,10 +16,18 @@ if(-not $ccRejected){throw 'Unverified installation accepted'}
 $ccFile=Join-Path ([IO.Path]::GetTempPath()) ('cc-update-check-'+[guid]::NewGuid().ToString('N'))
 try {
     [IO.File]::WriteAllText($ccFile,'installer fixture')
-    $ccHash=(Get-FileHash -LiteralPath $ccFile -Algorithm SHA256).Hash
+    $ccSha=[Security.Cryptography.SHA256]::Create()
+    try {$ccHash=[BitConverter]::ToString($ccSha.ComputeHash([IO.File]::ReadAllBytes($ccFile))).Replace('-','')} finally {$ccSha.Dispose()}
+    $setup=$ccFile; $expected=$ccHash.ToLowerInvariant()
+    function Get-FileHash {throw 'Get-FileHash must not be used'}
+    Invoke-Expression ([ModernHost.AppUpdater]::HashCheckScript())
     if(-not [ModernHost.AppUpdater]::VerifyFile($ccFile,$ccHash)){throw 'Valid checksum rejected'}
     [IO.File]::AppendAllText($ccFile,'modified')
     if([ModernHost.AppUpdater]::VerifyFile($ccFile,$ccHash)){throw 'Tampered file accepted'}
+    $ccTamperedRejected=$false
+    try {Invoke-Expression ([ModernHost.AppUpdater]::HashCheckScript())} catch {$ccTamperedRejected=$true}
+    if(-not $ccTamperedRejected){throw 'Helper accepted tampered installer'}
+    $ccLock=[IO.File]::Open($ccFile,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $ccLock.Dispose()
 } finally {if(Test-Path -LiteralPath $ccFile){Remove-Item -LiteralPath $ccFile}}
 Write-Output 'PASS updater version, release boundary and install guard'
 if($env:COMMANDCODE_TEST_UPDATER_LIVE -eq '1') {
