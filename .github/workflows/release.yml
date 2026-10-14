@@ -62,7 +62,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: powershell
         run: |
-          gh release create $env:GITHUB_REF_NAME --verify-tag --title "CommandCode Manager $env:GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          gh release create $env:GITHUB_REF_NAME --verify-tag --title "Multi Account Workspace $env:GITHUB_REF_NAME" --draft --notes-file RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           gh release upload $env:GITHUB_REF_NAME release/CommandCode-Manager-Setup-*.exe release/CommandCode-Manager-Portable-*.zip release/SHA256SUMS.txt
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+
+          gh release edit $env:GITHUB_REF_NAME --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

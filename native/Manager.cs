@@ -18,6 +18,8 @@ namespace CommandCodeManager {
 public class Settings {
     public int Interval { get; set; }
     public int PageSize { get; set; }
+    public int WindowWidth { get; set; }
+    public int WindowHeight { get; set; }
     public int Warning { get; set; }
     public int Critical { get; set; }
     public double LowBalance { get; set; }
