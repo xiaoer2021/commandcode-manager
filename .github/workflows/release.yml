@@ -46,6 +46,9 @@ jobs:
       - name: Verify renewal reminders
         shell: powershell
         run: ./modern/tests/renewal.ps1
+      - name: Verify local proxy
+        shell: powershell
+        run: ./modern/tests/local-proxy.ps1
       - name: Verify updater
         shell: powershell
         run: ./modern/tests/updater.ps1

@@ -11,6 +11,11 @@ try {
     if (Test-Path -LiteralPath $ccLocalStore) {
         Add-Type -AssemblyName System.Security
         try { $ccStore = Get-Content -LiteralPath $ccLocalStore -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { throw '本地账号文件无法读取，停止发布检查，原文件保留' }
+        if ($ccStore.Proxy.Secret) {
+            $ccPrivateValues.Add([string]$ccStore.Proxy.Secret)
+            $ccProxyKeyBytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($ccStore.Proxy.Secret),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+            $ccPrivateValues.Add([Text.Encoding]::UTF8.GetString($ccProxyKeyBytes))
+        }
         foreach ($ccAccount in $ccStore.Accounts) {
             $ccIdentityOrg = $ccAccount.Data.OrgId
             if ($ccAccount.Platform -eq 'opencode' -and $ccIdentityOrg -eq $ccAccount.ProviderId) { $ccIdentityOrg = $null }

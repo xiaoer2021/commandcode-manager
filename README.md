@@ -1,4 +1,5 @@
 # 多账号工作台
+本地 API 账号池的设置和使用见 [本地代理说明](docs/LOCAL_PROXY.md)。
 Windows 10/11 x64 多账号用量管理器，使用 React + TypeScript、.NET Framework 和系统 WebView2。前端为 React + TypeScript，桌面窗口、托盘和账号服务为 C#；GitHub 的语言标签按源码字节数统计，C# 为主要语言。支持官方网页登录授权、API Key、账号切换、余额与额度监控、日/周/月 Token 统计、本地历史缓存、CSV 导出及密码保护的账号迁移。
 ## 安装与数据
 从 [GitHub Releases](https://github.com/xiaoer2021/commandcode-manager/releases/latest) 下载安装包，安装后从桌面快捷方式打开。也可下载便携 ZIP，解压完整文件夹后运行。本仓库公开，可直接下载。

@@ -88,10 +88,18 @@ public class Account {
     public List<string> AlertIds { get; set; }
     public Account() { AlertIds = new List<string>(); }
 }
+public class ProxySettings {
+    public bool Enabled {get;set;}
+    public int Port {get;set;}
+    public string Secret {get;set;}
+    public List<string> AccountIds {get;set;}
+    public ProxySettings(){Port=17766;AccountIds=new List<string>();}
+}
 public class Store {
     public List<Account> Accounts { get; set; }
     public Settings Settings { get; set; }
-    public Store() { Accounts = new List<Account>(); Settings = new Settings(); }
+    public ProxySettings Proxy {get;set;}
+    public Store() { Accounts = new List<Account>(); Settings = new Settings(); Proxy=new ProxySettings(); }
 }
 public class ModelUsage {public string Model{get;set;}public double Tokens{get;set;}public double Input{get;set;}public double Output{get;set;}public double CacheRead{get;set;}public double CacheWrite{get;set;}public double Reasoning{get;set;}public double Requests{get;set;}public double Cost{get;set;}}
 public class Alert {
