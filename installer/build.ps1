@@ -18,6 +18,8 @@ foreach ($ccRelative in $ccAllowlist) {
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($ccDestination)) | Out-Null
     Copy-Item -LiteralPath (Join-Path (Join-Path $ccRoot 'desktop') $ccRelative) -Destination $ccDestination
 }
+Copy-Item -LiteralPath (Join-Path $ccRoot 'modern\stage\CommandCode Manager.exe') -Destination (Join-Path $ccStage 'CommandCode Manager.exe') -Force
+Copy-Item -LiteralPath (Join-Path $ccRoot 'modern\stage\CommandCode Manager.exe') -Destination (Join-Path $ccStage '多账号工作台.exe') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '使用说明.md') -Destination (Join-Path $ccStage '使用说明.md')
 $ccDownloads = Join-Path $PSScriptRoot 'downloads'
 [IO.Directory]::CreateDirectory($ccDownloads) | Out-Null

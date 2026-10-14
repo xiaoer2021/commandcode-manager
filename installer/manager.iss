@@ -12,7 +12,8 @@ AppId={{B39AE438-8327-4407-B38E-620E8109AA67}
 AppName=多账号工作台
 AppVersion={#AppVersion}
 AppPublisher=多账号工作台
-DefaultDirName={localappdata}\Programs\CommandCode Manager
+DefaultDirName={localappdata}\Programs\多账号工作台
+UsePreviousAppDir=no
 DefaultGroupName=多账号工作台
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -21,7 +22,7 @@ MinVersion=10.0.17763
 OutputDir=output
 OutputBaseFilename=CommandCode-Manager-Setup-{#AppVersion}
 SetupIconFile=..\modern\assets\manager.ico
-UninstallDisplayIcon={app}\CommandCode Manager.exe
+UninstallDisplayIcon={app}\多账号工作台.exe
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -33,14 +34,17 @@ Name: desktopicon; Description: "创建桌面快捷方式"; Flags: checkedonce
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RuntimeInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\MultiAccountWorkspace"; ValueType: string; ValueName: "DisplayName"; ValueData: "多账号工作台"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\MultiAccountWorkspace"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\多账号工作台.exe"
 [Icons]
-Name: "{group}\多账号工作台"; Filename: "{app}\CommandCode Manager.exe"
-Name: "{autodesktop}\多账号工作台"; Filename: "{app}\CommandCode Manager.exe"; Tasks: desktopicon
+Name: "{group}\多账号工作台"; Filename: "{app}\多账号工作台.exe"; AppUserModelID: "MultiAccountWorkspace"
+Name: "{autodesktop}\多账号工作台"; Filename: "{app}\多账号工作台.exe"; Tasks: desktopicon; AppUserModelID: "MultiAccountWorkspace"
 [InstallDelete]
 Type: files; Name: "{autodesktop}\CommandCode 管理器.lnk"
 Type: files; Name: "{userprograms}\CommandCode 管理器\CommandCode 管理器.lnk"
 [Run]
-Filename: "{app}\CommandCode Manager.exe"; Description: "打开 多账号工作台"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\多账号工作台.exe"; Description: "打开 多账号工作台"; Flags: nowait postinstall skipifsilent
 [Code]
 function NeedsWebView2: Boolean;
 var InstalledVersion: String;
