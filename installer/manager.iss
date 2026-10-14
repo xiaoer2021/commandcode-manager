@@ -1,4 +1,4 @@
-#ifndef AppVersion
+﻿#ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
 #ifndef StageDir
@@ -9,11 +9,11 @@
 #endif
 [Setup]
 AppId={{B39AE438-8327-4407-B38E-620E8109AA67}
-AppName=CommandCode 管理器
+AppName=多账号工作台
 AppVersion={#AppVersion}
-AppPublisher=CommandCode Manager
+AppPublisher=多账号工作台
 DefaultDirName={localappdata}\Programs\CommandCode Manager
-DefaultGroupName=CommandCode 管理器
+DefaultGroupName=多账号工作台
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -34,10 +34,13 @@ Name: desktopicon; Description: "创建桌面快捷方式"; Flags: checkedonce
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RuntimeInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 [Icons]
-Name: "{group}\CommandCode 管理器"; Filename: "{app}\CommandCode Manager.exe"
-Name: "{autodesktop}\CommandCode 管理器"; Filename: "{app}\CommandCode Manager.exe"; Tasks: desktopicon
+Name: "{group}\多账号工作台"; Filename: "{app}\CommandCode Manager.exe"
+Name: "{autodesktop}\多账号工作台"; Filename: "{app}\CommandCode Manager.exe"; Tasks: desktopicon
+[InstallDelete]
+Type: files; Name: "{autodesktop}\CommandCode 管理器.lnk"
+Type: files; Name: "{userprograms}\CommandCode 管理器\CommandCode 管理器.lnk"
 [Run]
-Filename: "{app}\CommandCode Manager.exe"; Description: "打开 CommandCode 管理器"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\CommandCode Manager.exe"; Description: "打开 多账号工作台"; Flags: nowait postinstall skipifsilent
 [Code]
 function NeedsWebView2: Boolean;
 var InstalledVersion: String;

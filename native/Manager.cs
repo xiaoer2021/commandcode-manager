@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -69,6 +69,7 @@ public class AccountData {
     public string Error { get; set; }
 }
 public class Account {
+    public string RenewalAt { get; set; }
     public string Platform { get; set; }
     public string ProviderId { get; set; }
     public string OpenCodeCredentialId { get; set; }
@@ -214,6 +215,8 @@ public static class Core {
     }
     public static List<Alert> Alerts(Account account, Settings settings, DateTimeOffset now) {
         List<Alert> result = new List<Alert>();
+        DateTimeOffset manualEnd;
+        if(TryTime(account.RenewalAt,out manualEnd)) { int manualDays=(int)Math.Ceiling((manualEnd-now).TotalDays);int manualBucket=manualDays<=0?0:manualDays<=1?1:manualDays<=3?3:manualDays<=7?7:-1;if(manualBucket>=0)result.Add(new Alert{Id="renewal:"+manualBucket+":"+account.RenewalAt,Text=manualDays<=0?"已到手动记录的续费时间":"手动记录的续费日期将在 "+manualDays+" 天内到达"}); }
         AccountData data = account.Data;
         if (data == null || !string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return result;
         WindowUsage[] windows = { data.FiveHour, data.Weekly };

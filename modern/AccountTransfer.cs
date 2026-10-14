@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -6,6 +6,7 @@ using System.Text;
 using System.Web.Script.Serialization;
 namespace ModernHost {
 public class PortableAccount {
+    public string RenewalAt { get; set; }
     public string Platform { get; set; }
     public string ProviderId { get; set; }
     public string Name { get; set; }

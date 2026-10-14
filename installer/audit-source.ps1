@@ -10,9 +10,13 @@ try {
     $ccLocalStore = Join-Path $env:APPDATA 'commandcode-account-manager\accounts-native.json'
     if (Test-Path -LiteralPath $ccLocalStore) {
         Add-Type -AssemblyName System.Security
-        $ccStore = Get-Content -LiteralPath $ccLocalStore -Raw | ConvertFrom-Json
+        try { $ccStore = Get-Content -LiteralPath $ccLocalStore -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { throw '本地账号文件无法读取，停止发布检查，原文件保留' }
         foreach ($ccAccount in $ccStore.Accounts) {
-            foreach ($ccValue in @($ccAccount.Id,$ccAccount.Secret,$ccAccount.Data.UserId,$ccAccount.Data.OrgId,$ccAccount.Data.Email)) {
+            $ccIdentityOrg = $ccAccount.Data.OrgId
+            if ($ccAccount.Platform -eq 'opencode' -and $ccIdentityOrg -eq $ccAccount.ProviderId) { $ccIdentityOrg = $null }
+            $ccIdentityEmail = $ccAccount.Data.Email
+            if ($ccAccount.Platform -eq 'opencode' -and $ccIdentityEmail -notmatch '@') { $ccIdentityEmail = $null }
+            foreach ($ccValue in @($ccAccount.Id,$ccAccount.Secret,$ccAccount.Data.UserId,$ccIdentityOrg,$ccIdentityEmail)) {
                 if ($ccValue -and ([string]$ccValue).Length -ge 6) { $ccPrivateValues.Add([string]$ccValue) }
             }
             if ($ccAccount.Secret) {
@@ -24,7 +28,7 @@ try {
     $ccMatches = New-Object 'System.Collections.Generic.List[string]'
     $ccOpenCodeAuth = Join-Path $env:USERPROFILE '.local\share\opencode\auth.json'
     if (Test-Path -LiteralPath $ccOpenCodeAuth) {
-        $ccOpenCodeValues = Get-Content -LiteralPath $ccOpenCodeAuth -Raw | ConvertFrom-Json
+        try { $ccOpenCodeValues = Get-Content -LiteralPath $ccOpenCodeAuth -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { throw 'OpenCode 登录文件无法读取，停止发布检查，原文件保留' }
         foreach ($ccProvider in $ccOpenCodeValues.psobject.Properties) {
             foreach ($ccField in @('key','access','refresh')) {
                 $ccValue = $ccProvider.Value.$ccField

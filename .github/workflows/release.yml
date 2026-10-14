@@ -43,6 +43,9 @@ jobs:
       - name: Verify OpenCode integration
         shell: powershell
         run: ./modern/tests/opencode.ps1
+      - name: Verify renewal reminders
+        shell: powershell
+        run: ./modern/tests/renewal.ps1
       - name: Verify updater
         shell: powershell
         run: ./modern/tests/updater.ps1
