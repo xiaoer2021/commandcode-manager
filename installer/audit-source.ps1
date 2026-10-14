@@ -2,7 +2,7 @@
 $ccRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $ccRoot
 try {
-    $ccFiles = @(git -c core.quotepath=false ls-files)
+    $ccFiles = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard)
     if ($LASTEXITCODE -ne 0 -or $ccFiles.Count -eq 0) { throw '没有可检查的源文件' }
     $ccForbidden = @($ccFiles | Where-Object { $_ -match '(^|/)(desktop|node_modules|sdk|stage[^/]*|downloads|output|release[^/]*|preview[^/]*)/|(^|/)(auth|accounts[^/]*|usage-history)\.json$|\.(ccaccounts|encrypted|exe|dll|zip|log)$' })
     if ($ccForbidden.Count -gt 0) { throw ('发现不应上传的文件：' + ($ccForbidden -join ', ')) }
@@ -22,6 +22,16 @@ try {
         }
     }
     $ccMatches = New-Object 'System.Collections.Generic.List[string]'
+    $ccOpenCodeAuth = Join-Path $env:USERPROFILE '.local\share\opencode\auth.json'
+    if (Test-Path -LiteralPath $ccOpenCodeAuth) {
+        $ccOpenCodeValues = Get-Content -LiteralPath $ccOpenCodeAuth -Raw | ConvertFrom-Json
+        foreach ($ccProvider in $ccOpenCodeValues.psobject.Properties) {
+            foreach ($ccField in @('key','access','refresh')) {
+                $ccValue = $ccProvider.Value.$ccField
+                if ($ccValue -and ([string]$ccValue).Length -ge 16) { $ccPrivateValues.Add([string]$ccValue) }
+            }
+        }
+    }
     foreach ($ccFile in $ccFiles) {
         $ccContent = [IO.File]::ReadAllText((Join-Path $ccRoot $ccFile))
         foreach ($ccValue in $ccPrivateValues) {

@@ -6,6 +6,8 @@ using System.Text;
 using System.Web.Script.Serialization;
 namespace ModernHost {
 public class PortableAccount {
+    public string Platform { get; set; }
+    public string ProviderId { get; set; }
     public string Name { get; set; }
     public string ApiKey { get; set; }
     public string Method { get; set; }
@@ -31,7 +33,8 @@ public static class AccountTransfer {
     private static void Password(string value) { if(string.IsNullOrEmpty(value)||value.Length<8||value.Length>1024)throw new InvalidOperationException("账号包密码需为 8–1024 个字符"); }
     public static void Validate(PortableAccount[] accounts) {
         if(accounts==null||accounts.Length==0||accounts.Length>200)throw new InvalidOperationException("账号包需包含 1–200 个账号");
-        foreach(PortableAccount a in accounts) if(a==null||string.IsNullOrWhiteSpace(a.ApiKey)||a.ApiKey.Length>8192||a.ApiKey.Contains("\r")||a.ApiKey.Contains("\n")||(a.Name??"").Length>80||(a.UserId??"").Length>256||(a.OrgId??"").Length>256||(a.UserName??"").Length>256||(a.Email??"").Length>320)throw new InvalidOperationException("账号包中的账号格式不正确");
+        foreach(PortableAccount a in accounts) if(a==null||(!string.IsNullOrEmpty(a.Platform)&&a.Platform!="opencode"&&a.Platform!="commandcode")||string.IsNullOrWhiteSpace(a.ApiKey)||a.ApiKey.Length>8192||a.ApiKey.Contains("\r")||a.ApiKey.Contains("\n")||(a.Name??"").Length>80||(a.UserId??"").Length>256||(a.OrgId??"").Length>256||(a.UserName??"").Length>256||(a.Email??"").Length>320)throw new InvalidOperationException("账号包中的账号格式不正确");
+        foreach(PortableAccount a in accounts)if(a.Platform=="opencode"){OpenCodeService.ValidateProvider(a.ProviderId);OpenCodeService.ParseValue(a.ApiKey);}
     }
     public static string Encrypt(PortableAccount[] accounts,string password) {
         Password(password);Validate(accounts);byte[] salt=Random(32),iv=Random(16),keys;

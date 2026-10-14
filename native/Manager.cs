@@ -32,6 +32,14 @@ public class WindowUsage {
     public double? Percent { get { return Used.HasValue && Cap.HasValue && Cap > 0 ? Used / Cap * 100 : null; } }
 }
 public class AccountData {
+    public string UsageUnit { get; set; }
+    public string MonthlyResetAt { get; set; }
+    public string UsageSource { get; set; }
+    public string UsageNote { get; set; }
+    public double? CacheReadTokens { get; set; }
+    public double? CacheWriteTokens { get; set; }
+    public double? ReasoningTokens { get; set; }
+    public ModelUsage[] Models { get; set; }
     public double? TotalTokens { get; set; }
     public double? InputTokens { get; set; }
     public double? OutputTokens { get; set; }
@@ -61,6 +69,9 @@ public class AccountData {
     public string Error { get; set; }
 }
 public class Account {
+    public string Platform { get; set; }
+    public string ProviderId { get; set; }
+    public string OpenCodeCredentialId { get; set; }
     public string CredentialState { get; set; }
     public string CredentialCheckedAt { get; set; }
     public string CredentialMessage { get; set; }
@@ -79,6 +90,7 @@ public class Store {
     public Settings Settings { get; set; }
     public Store() { Accounts = new List<Account>(); Settings = new Settings(); }
 }
+public class ModelUsage {public string Model{get;set;}public double Tokens{get;set;}public double Input{get;set;}public double Output{get;set;}public double CacheRead{get;set;}public double CacheWrite{get;set;}public double Reasoning{get;set;}public double Requests{get;set;}public double Cost{get;set;}}
 public class Alert {
     public string Id;
     public string Text;
@@ -88,7 +100,7 @@ public class ApiFailure : InvalidOperationException {
     public ApiFailure(int status) : base(status==401?"登录凭据已失效":status==403?"此账号没有访问权限":"官方接口 HTTP "+status) { StatusCode=status; }
 }
 public static class Core {
-    public static string CredentialLabel(string state) { switch(state) { case "valid":return "可用";case "limited":return "用量受限";case "invalid":return "已失效";case "forbidden":return "权限不足";case "network":return "网络异常";case "error":return "检测异常";default:return "待检测"; } }
+    public static string CredentialLabel(string state) { switch(state) { case "configured":return "已配置";case "valid":return "可用";case "limited":return "用量受限";case "invalid":return "已失效";case "forbidden":return "权限不足";case "network":return "网络异常";case "error":return "检测异常";default:return "待检测"; } }
     public static string CredentialFailure(Exception error) { ApiFailure api=error as ApiFailure; if(api!=null&&api.StatusCode==401)return "invalid";if(api!=null&&api.StatusCode==403)return "forbidden";return error.Message.Contains("超时")||error.Message.Contains("无法连接")?"network":"error"; }
     public static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
     private static readonly HttpClient Http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };

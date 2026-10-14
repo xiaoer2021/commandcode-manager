@@ -40,6 +40,12 @@ jobs:
       - name: Verify history cache
         shell: powershell
         run: ./modern/tests/history-cache.ps1
+      - name: Verify OpenCode integration
+        shell: powershell
+        run: ./modern/tests/opencode.ps1
+      - name: Verify updater
+        shell: powershell
+        run: ./modern/tests/updater.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-package

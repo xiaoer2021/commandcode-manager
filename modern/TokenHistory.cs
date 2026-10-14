@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using CommandCodeManager;
 namespace ModernHost {
 public class TokenPeriod {
+    public double? CacheRead { get; set; }
+    public double? CacheWrite { get; set; }
+    public double? Reasoning { get; set; }
     public string Start { get; set; }
     public string End { get; set; }
     public double? Tokens { get; set; }
