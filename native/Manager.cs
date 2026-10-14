@@ -89,11 +89,12 @@ public class Account {
     public Account() { AlertIds = new List<string>(); }
 }
 public class ProxySettings {
+    public string BindAddress {get;set;}
     public bool Enabled {get;set;}
     public int Port {get;set;}
     public string Secret {get;set;}
     public List<string> AccountIds {get;set;}
-    public ProxySettings(){Port=17766;AccountIds=new List<string>();}
+    public ProxySettings(){Port=17766;BindAddress="127.0.0.1";AccountIds=new List<string>();}
 }
 public class Store {
     public List<Account> Accounts { get; set; }

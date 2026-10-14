@@ -1,0 +1,15 @@
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using ModernHost;
+public static class ProxyNetworkChecks {
+private static void Check(bool value,string message){if(!value)throw new Exception(message);}
+private sealed class Handler:HttpMessageHandler {protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token){throw new Exception("health check must not call upstream");}}
+public static void Run(){RunAsync().GetAwaiter().GetResult();}
+private static async Task RunAsync(){var addresses=LocalProxy.NetworkAddresses();Check(addresses.Any(a=>a.address=="127.0.0.1"),"default local address missing");var network=addresses.FirstOrDefault(a=>a.address!="127.0.0.1");string address=network==null?"127.0.0.1":network.address;var probe=new TcpListener(IPAddress.Parse(address),0);probe.Start();int port=((IPEndPoint)probe.LocalEndpoint).Port;probe.Stop();string key=LocalProxy.GenerateKey();using(var gateway=new LocalProxy(()=>new ProxyAccount[0],new Handler()))using(var client=new HttpClient(new HttpClientHandler{UseProxy=false}){BaseAddress=new Uri("http://"+address+":"+port),Timeout=TimeSpan.FromSeconds(5)}){gateway.Configure(port,key,new[]{"fixture"},true,address);client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",key);Check((await client.GetAsync("/health")).IsSuccessStatusCode,"selected interface did not accept requests");using(var wrong=new HttpRequestMessage(HttpMethod.Get,"/health")){wrong.Headers.Authorization=new AuthenticationHeaderValue("Bearer","wrong");Check((int)(await client.SendAsync(wrong)).StatusCode==401,"network listener bypassed gateway key");}using(var wrongHost=new HttpRequestMessage(HttpMethod.Get,"/health")){wrongHost.Headers.Host="unrelated.example:"+port;Check((int)(await client.SendAsync(wrongHost)).StatusCode==403,"unrelated Host accepted");}using(var browser=new HttpRequestMessage(HttpMethod.Get,"/health")){browser.Headers.TryAddWithoutValidation("Origin","https://unrelated.example");Check((int)(await client.SendAsync(browser)).StatusCode==403,"network listener accepted browser cross-origin request");}bool rejected=false;try{gateway.Configure(port,key,new[]{"fixture"},true,"0.0.0.0");}catch(InvalidOperationException){rejected=true;}Check(rejected&&gateway.Running,"unselected wildcard binding accepted or stopped current listener");string next=LocalProxy.GenerateKey();gateway.Configure(port,next,new[]{"fixture"},true,address);client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",next);Check((await client.GetAsync("/health")).IsSuccessStatusCode,"key rotation lost selected network binding");}Console.WriteLine(address=="127.0.0.1"?"PASS network scope guards; no active non-loopback interface available":"PASS selected network interface HTTP, key requirement, Host/Origin restrictions and binding persistence");}
+}
