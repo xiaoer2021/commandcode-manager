@@ -88,13 +88,17 @@ public class Account {
     public List<string> AlertIds { get; set; }
     public Account() { AlertIds = new List<string>(); }
 }
+public class ProxyAccessKey {public string Id {get;set;}public string Name {get;set;}public string Secret {get;set;}public bool Enabled {get;set;}public string CreatedAt {get;set;}}
 public class ProxySettings {
+    public bool AutoJoin {get;set;}
+    public List<ProxyAccessKey> AccessKeys {get;set;}
+    public bool KeysMigrated {get;set;}
     public string BindAddress {get;set;}
     public bool Enabled {get;set;}
     public int Port {get;set;}
     public string Secret {get;set;}
     public List<string> AccountIds {get;set;}
-    public ProxySettings(){Port=17766;BindAddress="127.0.0.1";AccountIds=new List<string>();}
+    public ProxySettings(){Port=17766;BindAddress="127.0.0.1";AccountIds=new List<string>();AccessKeys=new List<ProxyAccessKey>();}
 }
 public class Store {
     public List<Account> Accounts { get; set; }

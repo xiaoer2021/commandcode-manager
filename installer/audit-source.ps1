@@ -16,6 +16,7 @@ try {
             $ccProxyKeyBytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($ccStore.Proxy.Secret),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
             $ccPrivateValues.Add([Text.Encoding]::UTF8.GetString($ccProxyKeyBytes))
         }
+        foreach($ccManagedKey in $ccStore.Proxy.AccessKeys){if($ccManagedKey.Secret){$ccPrivateValues.Add([string]$ccManagedKey.Secret);$ccManagedBytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($ccManagedKey.Secret),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);$ccPrivateValues.Add([Text.Encoding]::UTF8.GetString($ccManagedBytes))}}
         foreach ($ccAccount in $ccStore.Accounts) {
             $ccIdentityOrg = $ccAccount.Data.OrgId
             if ($ccAccount.Platform -eq 'opencode' -and $ccIdentityOrg -eq $ccAccount.ProviderId) { $ccIdentityOrg = $null }
