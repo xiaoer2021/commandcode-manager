@@ -26,6 +26,7 @@ if($env:COMMANDCODE_TEST_UPDATER_LIVE -eq '1') {
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
     $ccUpdater.Check('1.0.0').GetAwaiter().GetResult()
     if($ccUpdater.Status -ne 'available'){throw $ccUpdater.Error}
+    if(-not $ccUpdater.Notes -or -not $ccUpdater.PublishedAt){throw 'Release notes missing'}
     $ccUpdater.Download().GetAwaiter().GetResult()
     if($ccUpdater.Status -ne 'ready'){throw $ccUpdater.Error}
     Write-Output "PASS live GitHub release metadata, download and SHA256 v$($ccUpdater.Latest)"

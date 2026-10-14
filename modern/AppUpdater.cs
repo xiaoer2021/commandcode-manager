@@ -11,7 +11,7 @@ using System.Web.Script.Serialization;
 using System.Collections.Generic;
 namespace ModernHost {
 public sealed class AppUpdater {
-    public string Status="idle",Latest="",Error="";
+    public string Status="idle",Latest="",Error="",Notes="",PublishedAt="";
     public int Progress;
     private string assetUrl,checksumUrl,download,expectedHash;
     private bool working;
@@ -27,6 +27,7 @@ public sealed class AppUpdater {
             string json;using(var c=Client())json=await c.DownloadStringTaskAsync("https://api.github.com/repos/xiaoer2021/commandcode-manager/releases/latest");
             var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);string tag=Convert.ToString(data["tag_name"]);
             if(!Regex.IsMatch(tag,@"^v\d+\.\d+\.\d+$")||Convert.ToBoolean(data["draft"])||Convert.ToBoolean(data["prerelease"]))throw new InvalidOperationException("发布版本格式异常");
+            Notes=data.ContainsKey("body")?Convert.ToString(data["body"]):"";if(Notes.Length>50000)Notes=Notes.Substring(0,50000);PublishedAt=data.ContainsKey("published_at")?Convert.ToString(data["published_at"]):"";
             Latest=tag.Substring(1);string name="CommandCode-Manager-Setup-"+Latest+".exe";assetUrl=null;checksumUrl=null;
             foreach(Dictionary<string,object> asset in (System.Collections.IEnumerable)data["assets"]) { string n=Convert.ToString(asset["name"]),u=Convert.ToString(asset["browser_download_url"]);if((n==name||n=="SHA256SUMS.txt")&&Trusted(u,Latest,n)){if(n==name){long size=Convert.ToInt64(asset["size"]);if(size<100000||size>268435456)throw new InvalidOperationException("安装包大小异常");assetUrl=u;}else checksumUrl=u;} }
             if(Newer(Latest,current)){if(assetUrl==null||checksumUrl==null)throw new InvalidOperationException("新版本安装文件尚未上传完整，请稍后重试");Status="available";}else Status="current";
