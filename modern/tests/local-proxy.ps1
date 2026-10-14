@@ -6,3 +6,5 @@ Add-Type -Path (Join-Path $PSScriptRoot 'LocalProxyChecks.cs') -ReferencedAssemb
 [LocalProxyChecks]::Run()
 Add-Type -Path (Join-Path $PSScriptRoot 'OpenCodeProxyChecks.cs') -ReferencedAssemblies $ccHost,'System.Core.dll','System.Net.Http.dll','System.Web.Extensions.dll','System.Security.dll'
 [OpenCodeProxyChecks]::Run()
+Add-Type -Path (Join-Path $PSScriptRoot 'ProxyQuotaChecks.cs') -ReferencedAssemblies $ccHost,'System.Core.dll','System.Net.Http.dll','System.Web.Extensions.dll','System.Security.dll'
+[ProxyQuotaChecks]::Run()
