@@ -1,61 +1,188 @@
 # 多账号工作台
-本地 API 账号池的设置和使用见 [本地代理说明](docs/LOCAL_PROXY.md)。
-Windows 10/11 x64 多账号用量管理器，使用 React + TypeScript、.NET Framework 和系统 WebView2。前端为 React + TypeScript，桌面窗口、托盘和账号服务为 C#；GitHub 的语言标签按源码字节数统计，C# 为主要语言。支持官方网页登录授权、API Key、账号切换、余额与额度监控、日/周/月 Token 统计、本地历史缓存、CSV 导出及密码保护的账号迁移。
-## 界面预览与操作图
 
-截图来自 v1.5.1，全部使用模拟账号与演示数据，不包含个人账号或真实 Key。点击图片可打开原图。
+一个面向 Windows 的多平台 API 账号管理工具，把账号、用量、Token 统计和本地代理集中到一个工作台。
 
-[![多账号工作台：账号总览](docs/screenshots/v1.5.1/overview.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/overview.png)
+支持 **Command Code** 和 **OpenCode Go / Zen**。适合持有多个账号、需要关注额度变化，或希望通过统一 API 地址使用账号池的用户。
 
-[查看全部 8 张操作图](docs/screenshots/v1.5.1/README.md) · [按版本查看功能图](docs/SCREENSHOTS.md)
+[下载安装](https://github.com/xiaoer2021/commandcode-manager/releases/latest) · [界面与操作图](docs/screenshots/v1.5.1/README.md) · [本地代理使用说明](docs/LOCAL_PROXY.md)
 
-<details>
-<summary>卡片视图与 Token 用量统计</summary>
+[![多账号工作台总览](docs/screenshots/v1.5.1/overview.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/overview.png)
 
-[![卡片视图](docs/screenshots/v1.5.1/cards.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/cards.png)
+## 可以做什么
+
+| 功能 | 说明 |
+| --- | --- |
+| 多平台账号 | 添加官方账号、粘贴 API Key 或导入本机登录；按平台筛选，修改别名和启用对应平台账号 |
+| 额度与提醒 | 查看月度、每周、5 小时用量及重置时间，按设定间隔刷新，达到阈值后桌面提醒 |
+| Token 统计 | 查看输入、输出和累计 Token，按日、周、月查询，支持日期范围与 CSV 导出 |
+| 列表与卡片 | 一键切换账号展示形式，支持搜索、分页、自动或手动调整每页数量 |
+| 账号右键菜单 | 打开应用、启用账号、修改别名、查看详情、刷新用量和导出单个账号 |
+| 账号导入导出 | 使用密码保护的账号包迁移账号，导入后继续使用 |
+| 本地 API 代理 | 使用统一地址和代理 Key；在请求开始前遇到明确限额时尝试其他兼容账号 |
+| 自动账号池 | 可用账号自动加入，额度不足或受限账号退出，恢复后重新参与 |
+| 多 Key 管理 | 为不同设备生成独立 Key，支持复制、禁用和删除 |
+| 快速使用 | 将代理地址与模型配置到 Command Code / OpenCode，减少手动配置 |
+| 托盘运行 | 关闭主窗口后继续监控，通过托盘刷新用量或启用账号 |
+
+平台返回的数据能力不同，未提供的字段不会估算。OpenCode 本地历史按服务商汇总，不代表单个登录账号的独立账单；Go 的续费日期可在账号详情中手动记录。
+
+## 产品界面
+
+### Token 用量统计
+
+右键账号选择“用量统计”，按每天、每周、每月查看，选择日期范围后查询或导出明细。
 
 [![Token 用量统计](docs/screenshots/v1.5.1/token-history.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/token-history.png)
 
+### 本地代理与账号池
+
+在顶部打开“本地代理”，选择可用账号并开启，可复制统一 API 地址和代理 Key 供其他软件或同网络设备使用。
+
+[![本地代理账号池](docs/screenshots/v1.5.1/proxy-pool.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/proxy-pool.png)
+
+<details>
+<summary>查看卡片视图、添加账号和账号右键菜单</summary>
+
+**卡片视图**：点击“刷新用量”右侧的视图按钮切换。
+
+[![账号卡片视图](docs/screenshots/v1.5.1/cards.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/cards.png)
+
+**添加账号**：选择平台与服务，按界面提示登录、粘贴 API Key 或导入本机账号。
+
+[![添加账号](docs/screenshots/v1.5.1/add-account.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/add-account.png)
+
+**右键菜单**：在账号上点击鼠标右键，直接操作该账号。
+
+[![账号右键菜单](docs/screenshots/v1.5.1/account-menu.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/account-menu.png)
+
 </details>
 
-## 安装与数据
-从 [GitHub Releases](https://github.com/xiaoer2021/commandcode-manager/releases/latest) 下载安装包，安装后从桌面快捷方式打开。也可下载便携 ZIP，解压完整文件夹后运行。本仓库公开，可直接下载。
-账号、备注、设置和用量缓存保存在当前 Windows 用户的应用数据目录，凭据通过 Windows DPAPI 保护。账号密码只在官方网页登录页面输入，不保存在管理器中。安装包、源码和 Releases 不包含本机账号或缓存。
-覆盖安装和卸载默认保留个人数据。关闭窗口继续托盘监控，安装前请从托盘“彻底退出”。v1.1.0 起，启动时及每 15 分钟自动检查 GitHub 最新正式版本；检查失败后 5 分钟自动重试，重新打开窗口时补查；底部“查看更新”也可手动检查。发现新版本在顶部提示，下载显示进度，SHA256 校验通过后点击“安装并重启”。安装版自动退出、覆盖安装并重启；便携版打开安装向导。1.0.1 及更早版本需手动覆盖安装一次。
-## 本地构建
-需要 Node.js 24、Windows .NET Framework 4.8、Inno Setup 6。运行 installer/build.ps1，脚本安装前端依赖、恢复指定版本 WebView2 SDK、构建并生成安装包和便携包。WebView2 Bootstrapper 下载后验证微软签名。
-modern/ui/ 是界面源码，modern/Host.cs 是桌面主程序，native/Manager.cs 是账号与 API 服务，modern/addons/ 是官方客户端用量面板组件。其余 Electron 目录保留为旧版源码，当前发布不使用旧版构建。
-## 发布更新
-1. 修改代码，将 version.json 中版本改为下一版，例如 1.0.1。
-2. 提交并推送 main 分支，GitHub Actions 自动检查并生成构建产物。
-3. 创建并推送对应标签，例如 v1.0.1；标签必须与 version.json 一致。
-4. 在 `docs/screenshots/v版本号/` 保存本次功能截图和 `manifest.json`（version、demoData=true、images），更新图集索引和 RELEASE_NOTES.md 的图片链接。只能使用模拟账号，不展示真实 Key。
-5. GitHub Actions 检查本版图片和发布说明，生成 Release，附带安装包、便携包、SHA256SUMS.txt 和功能截图。
-普通代码推送不会直接发布给用户，推送与 version.json 一致的版本标签后才发布。软件自动检查并提示更新，用户点击下载和安装后执行升级；无需 GitHub 登录。更新仅使用此仓库的 HTTPS 发布地址，并与发布附件 SHA256SUMS.txt 校验；这用于完整性检查，不等于独立的开发者代码签名。
-## 验证
-modern/tests/portable-features.ps1 验证加密迁移、凭据分类、日期分页与 CSV；modern/tests/history-cache.ps1 验证缓存隔离和增量查询。固定程序 --verify 使用模拟账号验证界面，不修改真实账号。
-## 接口说明
-使用 CommandCode 官方 alpha 接口获取身份、额度、订阅和请求汇总，接口可能随官方产品变化。Token 数据来自官方汇总，并按周期边界差值统计，不通过费用估算。
-## v1.0.1 界面与操作
-登录窗口使用官方 SVG 标识。导入账号显示实时步骤，重复账号在本地快速识别并作为普通提示处理。账号列表窗口默认每页 5 条，最大化默认 6 条，可在居中的分页器旁选择数量；菜单根据窗口可用空间显示选项。窗口大小调整结束后提供顶部恢复默认提示，顶部边缘支持拖拽，列表利用剩余高度。
-## v1.1.0 OpenCode 接入
-添加账号选择 OpenCode，支持 Go、Zen / Console 及外接服务商。Go 可打开官方网页登录页获取 API Key；Console、OpenAI、GitHub Copilot 等会按已安装 OpenCode v2 提供的授权方式登录，也可直接添加 API Key 或导入本机凭据。授权和切换要求安装 OpenCode v2，管理器自动查找官方客户端内的 CLI。
-账号切换通过 OpenCode 官方凭据 API 执行，不直接修改它的数据库；其他服务商保持原账号。切换前将凭据快照用 Windows DPAPI 加密备份到管理器账号数据目录。已有会话未更新时重新打开 OpenCode，新会话使用新账号。
-OpenCode Go 的 5 小时、每周、每月用量和重置时间从官方 usage 接口查询；这些是比例，不能当作美元额度。OpenRouter、DeepSeek 有对应余额接口；其他服务商未提供余额接口时显示缺失，未确认的订阅有效期不推测。
-本地统计以只读方式读取 opencode.db，支持新旧表按消息 ID 去重，并排除新版分叉复制的记录。按服务商统计输入、输出、推理、缓存读取和缓存写入，支持日/周/月及模型累计，CSV 保留完整数字和统计来源。
-本地记录没有可靠的账号身份，因此历史 Token 是服务商汇总，不能解释为该登录账号的全部消费；同服务商多账号的汇总在工作台只加一次。本地费用为客户端记录的估算，不能替代服务商账单。
-OpenCode 不安装客户端内面板。只有授权、切换需要启动受随机密码保护的本机官方后台；空闲一分钟自动停止，不额外运行 Node。运行凭据不进入源码、安装包或日志。
-测试：modern/tests/opencode.ps1 验证只读数据库、旧新记录去重、分叉排除、缓存和推理计数、模型及周期汇总、官方切换请求、其他服务商隔离、加密备份及跨平台账号包。
-## v1.1.1 更新面板与添加账号
-新版本提示可打开顶部更新面板，显示 GitHub Release 更新说明、发布时间、下载进度和安装入口。添加账号使用带平台标识的下拉选择；OpenCode Go / Zen 直接粘贴 API Key，可打开官网获取，不提供无效的账号密码授权。OpenAI / GitHub Copilot 仅在本机官方客户端返回有效 OAuth 方法后显示官方授权。
+<details>
+<summary>查看代理 Key 管理与快速使用</summary>
 
-## v1.2.0 多平台工作台
-软件显示名称和快捷方式改为多账号工作台，保持安装目录、应用标识和个人数据目录以兼容旧版升级。顶部概览精简为账号数量、可用余额和累计 Token；关注数量并入账号概览。列表支持全部账号、CommandCode、OpenCode 筛选，概览随筛选变化。
-OpenCode Go 账号详情可手动记录续费日期和时间，提前 7 / 3 / 1 天及到期提醒。每分钟在本地检查，无需为提醒请求 API，即使暂停用量刷新仍可提醒；需要程序运行且开启桌面提醒。日期仅用于提醒，以官网账单为准，续费后需修改。日期随加密账号包导入导出。
-弹窗点击外部关闭；授权等待会取消，导入导出或日期保存期间不会中断，更新下载期间关闭面板继续下载。
+**代理 Key 管理**：为不同设备命名生成 Key，分别控制启用状态。
 
-## v1.3.0 布局、启动和日期选择
-默认窗口按更高的尺寸打开，并保存用户拖拽后的窗口大小。刷新右侧可切换列表和双列卡片，列表默认显示，形式会记住；卡片按空间分页，平台筛选后从首行排列。账号头像显示小型平台 SVG 标识，顶部移除后台监控提示。
-OpenCode Go 真实用量接口返回 status / percent / resetsAt；界面显示剩余额度百分比（100% 减去已用），不估算美元或可用 Token。
-每行的启动图标先切换到所选账号，再打开对应官方桌面客户端；现有会话以官方客户端行为为准，新会话使用切换后的账号。需要安装对应客户端，管理器不会强制结束已有程序。
-用量范围和手动续费日期统一采用 Ant Design 中文日期组件，支持日期范围、快捷周期和时分秒，续费日期按北京时间保存。
+[![代理 Key 管理](docs/screenshots/v1.5.1/proxy-keys.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/proxy-keys.png)
+
+**快速使用**：开启代理并保存后选择客户端。Command Code 重开后需选择“工作台代理”模型组；客户端已运行时，会先询问是否重启。
+
+[![客户端快速使用](docs/screenshots/v1.5.1/quick-use.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/quick-use.png)
+
+</details>
+
+## 下载与安装
+
+适用于 **Windows 10 / 11 x64**。
+
+1. 打开 [最新版本下载页](https://github.com/xiaoer2021/commandcode-manager/releases/latest)，展开 **Assets**。
+2. 下载名称包含 **Setup** 的 `.exe`，运行安装向导；或下载包含 **Portable** 的 `.zip`，完整解压后运行“多账号工作台.exe”。
+3. 首次运行若提示缺少 WebView2，请完成运行环境安装。
+4. 打开“添加账号”，选择平台并添加账号。已有账号也可通过“账号工具”导入。
+
+工作台会自动检测新版本，发现更新后提示，由用户选择下载和安装。关闭窗口后继续托盘运行；需要完全退出时，右键托盘图标选择“彻底退出”。
+
+## 数据保存与账号迁移
+
+账号、备注、设置和用量缓存保存在当前 Windows 用户的 `%APPDATA%\commandcode-account-manager` 目录，凭据使用 Windows DPAPI 加密。官方网页登录的密码不会保存在工作台。
+
+更换电脑时，通过“账号工具 → 导出账号”生成密码保护的账号包，在另一台电脑导入。直接复制本机加密数据文件不能代替账号导出。覆盖安装和卸载默认保留个人数据。
+
+## 本地代理如何使用
+
+1. 添加支持 API 的账号并刷新用量。
+2. 打开“本地代理”，勾选可用账号，或开启“自动加入账号池”。
+3. 开启并保存，复制面板中的 API 地址和代理 Key 到调用软件；也可通过“快速使用”配置受支持客户端。
+4. 保持工作台运行，其他设备使用时需处于可连通网络。
+
+代理默认选择正常局域网网卡，不修改系统代理、VPN、路由或 DNS。自动换号保留原模型和平台；已经开始输出的回复不会重放，所有兼容账号都不可用时仍会返回错误。详细配置见 [本地代理说明](docs/LOCAL_PROXY.md)。
+
+## 自己开发与运行
+
+### 技术组成
+
+| 部分 | 技术 |
+| --- | --- |
+| 用户界面 | React、TypeScript、Ant Design、Vite |
+| 桌面程序 | C#、.NET Framework 4.8、WebView2 |
+| 数据保护 | Windows DPAPI |
+| 安装包 | Inno Setup |
+
+### 准备环境
+
+- Windows 10 / 11 x64、Git、Node.js 24。
+- .NET Framework 4.8 与 WebView2 Runtime。
+- 仅生成安装包时需要 Inno Setup 6。
+
+### 首次构建并启动
+
+在 PowerShell 中执行：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+git clone https://github.com/xiaoer2021/commandcode-manager.git
+cd commandcode-manager
+powershell -NoProfile -ExecutionPolicy Bypass -File modern/restore-sdk.ps1
+if ($LASTEXITCODE -ne 0) { throw 'WebView2 SDK 准备失败' }
+npm --prefix modern/ui ci
+if ($LASTEXITCODE -ne 0) { throw '界面依赖安装失败' }
+npm --prefix modern/ui run build
+if ($LASTEXITCODE -ne 0) { throw '界面构建失败' }
+powershell -NoProfile -ExecutionPolicy Bypass -File modern/build.ps1
+if ($LASTEXITCODE -ne 0) { throw '桌面构建失败' }
+& '.\desktop\CommandCode Manager.exe'
+```
+
+### 修改代码后重新构建
+
+在项目根目录执行，构建完成后重新打开本地开发程序：
+
+```powershell
+npm --prefix modern/ui run build
+if ($LASTEXITCODE -ne 0) { throw '界面构建失败' }
+powershell -NoProfile -ExecutionPolicy Bypass -File modern/build.ps1
+if ($LASTEXITCODE -ne 0) { throw '桌面构建失败' }
+& '.\desktop\CommandCode Manager.exe'
+```
+
+开发程序默认使用当前 Windows 用户的数据目录。查看界面或验证布局时，可使用隔离的模拟模式：
+
+```powershell
+& '.\desktop\CommandCode Manager.exe' --verify
+```
+
+### 主要代码位置
+
+| 路径 | 修改内容 |
+| --- | --- |
+| `modern/ui/src/` | 页面、样式、交互与组件 |
+| `modern/Host.cs` | 桌面窗口、托盘及界面与后台通信 |
+| `modern/LocalProxy.cs` | 本地代理、账号调度与请求转发 |
+| `modern/ProxyClientSetup.cs` | 快速使用的客户端配置 |
+| `modern/OpenCode.cs` | OpenCode 接入与本地统计 |
+| `native/Manager.cs` | 账号、用量、提醒和本地数据 |
+| `modern/tests/` | 主要功能验证 |
+| `installer/` | 安装包、打包与公开文件检查 |
+| `docs/` | 使用说明与产品截图 |
+
+当前桌面程序使用 `modern/` 与 `native/`。根目录的 Electron 入口及 `ui/`、`lib/` 保留为早期代码，不用于当前桌面包。
+
+### 生成安装包
+
+安装 Inno Setup 6 后，在项目根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1
+```
+
+脚本会准备前端依赖和 WebView2 SDK，构建桌面程序，生成安装 `.exe`、便携 `.zip` 和 `SHA256SUMS.txt`，输出到 `release/`。
+
+### 发布自己的修改
+
+修改 `version.json`，补充 `RELEASE_NOTES.md` 和对应功能截图，再提交代码。仓库已配置 GitHub Actions：推送主分支执行构建与检查，推送与版本号匹配的 `v` 标签后创建 Release。
+
+发布前执行公开文件检查，账号、凭据、缓存和本地产物不应进入源码仓库：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/audit-source.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/check-release-images.ps1
+```
