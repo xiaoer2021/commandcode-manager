@@ -12,3 +12,21 @@
 ## 验证
 灰色账号禁选、全选排除、端口即时预览、Key 弹窗增删和开关通过界面验证。多 Key 验证、旧 Key 迁移、禁用后的请求拒绝、自动恢复入池、JSON/JSONC 配置合并、加密备份和错误文件保护通过模拟验证。
 客户端配置测试使用临时文件，没有修改本机官方客户端配置，没有消耗真实账号额度测试生成。本机安装更新由用户自行操作，源码和安装包不包含个人账号、Key 或缓存。
+
+## 本次功能界面图
+
+以下截图来自 v1.5.1 模拟账号，不包含个人账号或真实 Key。图中回环地址和端口仅用于隔离演示。
+
+### 账号池与自动加入
+
+![账号池与自动加入](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/proxy-pool.png)
+
+### 独立代理 Key 管理
+
+![独立代理 Key 管理](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/proxy-keys.png)
+
+### 快速使用
+
+![快速使用](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/quick-use.png)
+
+[查看完整界面与操作图](https://github.com/xiaoer2021/commandcode-manager/blob/main/docs/screenshots/v1.5.1/README.md)

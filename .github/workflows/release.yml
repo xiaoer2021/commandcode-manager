@@ -26,6 +26,10 @@ jobs:
       - name: Check source boundaries
         shell: powershell
         run: ./installer/audit-source.ps1
+      - name: Check release screenshots
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        run: ./installer/check-release-images.ps1
       - name: Build installer
         shell: powershell
         run: |
@@ -69,6 +73,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           gh release upload $env:GITHUB_REF_NAME release/CommandCode-Manager-Setup-*.exe release/CommandCode-Manager-Portable-*.zip release/SHA256SUMS.txt
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $ccManifest = Get-Content "docs/screenshots/$env:GITHUB_REF_NAME/manifest.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          $ccImages = @($ccManifest.images | ForEach-Object { "docs/screenshots/$env:GITHUB_REF_NAME/$($_.file)" })
+          gh release upload $env:GITHUB_REF_NAME @ccImages
+          if ($LASTEXITCODE -ne 0) { throw 'Release screenshot upload failed' }
 
           gh release edit $env:GITHUB_REF_NAME --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

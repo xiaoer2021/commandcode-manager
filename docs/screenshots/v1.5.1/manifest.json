@@ -1,0 +1,39 @@
+{
+  "version": "1.5.1",
+  "demoData": true,
+  "source": "v1.5.1 --verify simulated UI, captured 2026-10-15; no live account requests",
+  "images": [
+    {
+      "file": "overview.png",
+      "title": "账号总览"
+    },
+    {
+      "file": "cards.png",
+      "title": "卡片视图"
+    },
+    {
+      "file": "add-account.png",
+      "title": "添加 OpenCode 账号"
+    },
+    {
+      "file": "token-history.png",
+      "title": "Token 用量统计"
+    },
+    {
+      "file": "account-menu.png",
+      "title": "账号右键操作"
+    },
+    {
+      "file": "proxy-pool.png",
+      "title": "代理账号池"
+    },
+    {
+      "file": "proxy-keys.png",
+      "title": "代理 Key 管理"
+    },
+    {
+      "file": "quick-use.png",
+      "title": "快速使用"
+    }
+  ]
+}
