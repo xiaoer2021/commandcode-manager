@@ -7,6 +7,13 @@ if([ModernHost.AppUpdater]::Newer('bad','1.0.1')){throw 'Invalid version accepte
 if([ModernHost.AppUpdater]::Newer('1.1.0','1.1.0')){throw 'Same version offered'}
 $ccUrl='https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.1.0/CommandCode-Manager-Setup-1.1.0.exe'
 if(-not [ModernHost.AppUpdater]::Trusted($ccUrl,'1.1.0','CommandCode-Manager-Setup-1.1.0.exe')){throw 'Own release rejected'}
+if([ModernHost.AppUpdater]::LatestTagFromUrl('https://github.com/xiaoer2021/commandcode-manager/releases/tag/v1.5.3') -ne 'v1.5.3'){throw 'Latest stable tag parsing failed'}
+$ccWrongReleaseRejected=$false
+try{[void][ModernHost.AppUpdater]::LatestTagFromUrl('https://github.com/xiaoer2021/other/releases/tag/v1.5.3')}catch{$ccWrongReleaseRejected=$true}
+if(-not $ccWrongReleaseRejected){throw 'Wrong repository latest URL accepted'}
+$ccNotes='<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Workspace v1.5.3</title><updated>2026-10-23T08:30:37Z</updated><content type="html">&amp;lt;h2&amp;gt;本次更新&amp;lt;/h2&amp;gt;&amp;lt;ul&amp;gt;&amp;lt;li&amp;gt;支持更新&amp;lt;/li&amp;gt;&amp;lt;/ul&amp;gt;</content></entry></feed>'
+$ccPublished='';$ccParsedNotes=[ModernHost.AppUpdater]::NotesFromAtom($ccNotes,'v1.5.3',[ref]$ccPublished)
+if($ccParsedNotes -notmatch '支持更新' -or $ccParsedNotes -notmatch '- 支持更新' -or $ccPublished -ne '2026-10-23T08:30:37Z'){throw 'Atom update notes parsing failed'}
 if([ModernHost.AppUpdater]::Trusted($ccUrl.Replace('xiaoer2021','attacker'),'1.1.0','CommandCode-Manager-Setup-1.1.0.exe')){throw 'Wrong repository accepted'}
 if([ModernHost.AppUpdater]::Trusted($ccUrl.Replace('https:','http:'),'1.1.0','CommandCode-Manager-Setup-1.1.0.exe')){throw 'HTTP accepted'}
 $ccUpdater=New-Object ModernHost.AppUpdater

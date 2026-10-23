@@ -7,8 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
-using System.Collections.Generic;
+using System.Xml;
 namespace ModernHost {
 public sealed class AppUpdater {
     public string Status="idle",Latest="",Error="",Notes="",PublishedAt="";
@@ -21,21 +20,24 @@ public sealed class AppUpdater {
     public Action Changed=delegate{};
     public static bool Newer(string candidate,string current) { Version a,b;return Version.TryParse(candidate,out a)&&Version.TryParse(current,out b)&&a>b; }
     public static bool Trusted(string url,string tag,string name) { return url=="https://github.com/xiaoer2021/commandcode-manager/releases/download/v"+tag+"/"+name; }
+    public static string LatestTagFromUrl(string url) { Uri uri; if(!Uri.TryCreate(url,UriKind.Absolute,out uri)||uri.Scheme!=Uri.UriSchemeHttps||uri.Host!="github.com")throw new InvalidOperationException("未能识别 GitHub 最新稳定版本");var m=Regex.Match(uri.AbsolutePath,@"^/xiaoer2021/commandcode-manager/releases/tag/(v\d+\.\d+\.\d+)$");if(!m.Success)throw new InvalidOperationException("未能识别 GitHub 最新稳定版本");return m.Groups[1].Value; }
+    public static string NotesFromAtom(string xml,string tag,out string updated) { updated="";var doc=new XmlDocument();doc.XmlResolver=null;doc.LoadXml(xml);var ns=new XmlNamespaceManager(doc.NameTable);ns.AddNamespace("a","http://www.w3.org/2005/Atom");foreach(XmlNode entry in doc.SelectNodes("/a:feed/a:entry",ns)){var title=entry.SelectSingleNode("a:title",ns);if(title==null||!Regex.IsMatch(title.InnerText,@"(?:^|\s)"+Regex.Escape(tag)+@"$"))continue;var date=entry.SelectSingleNode("a:updated",ns);updated=date==null?"":date.InnerText;var content=entry.SelectSingleNode("a:content",ns);return content==null?"":AtomHtmlToText(content.InnerText);}throw new InvalidOperationException("GitHub 发布说明中未找到 "+tag); }
+    private static string AtomHtmlToText(string value) { string s=System.Net.WebUtility.HtmlDecode(value??"");s=Regex.Replace(s,@"(?i)<br\s*/?>", "\n");s=Regex.Replace(s,@"(?i)</(p|div|h[1-6]|ul|ol|li|pre|blockquote)\s*>","\n");s=Regex.Replace(s,@"(?i)<li\b[^>]*>","- ");s=Regex.Replace(s,@"(?i)<h[1-6]\b[^>]*>","# ");s=Regex.Replace(s,@"<[^>]+>","");s=System.Net.WebUtility.HtmlDecode(s);s=Regex.Replace(s,@"[ \t]+\n","\n");s=Regex.Replace(s,@"\n{3,}","\n\n");return s.Trim(); }
     public static bool VerifyFile(string path,string expected) { using(var sha=SHA256.Create())using(var file=File.OpenRead(path))return BitConverter.ToString(sha.ComputeHash(file)).Replace("-","").Equals(expected,StringComparison.OrdinalIgnoreCase); }
     private sealed class UpdateClient : WebClient { protected override WebRequest GetWebRequest(Uri address) { var r=base.GetWebRequest(address);r.Timeout=60000;return r; } }
     private WebClient Client() { var c=new UpdateClient();c.Encoding=Encoding.UTF8;c.Headers[HttpRequestHeader.UserAgent]="CommandCode-Manager-Updater";return c; }
     public async Task Check(string current) {
         if(working||Status=="ready")return;working=true;LastAttempt=DateTimeOffset.UtcNow;Status="checking";Error="";Changed();
         try {
-            string json;using(var c=Client())json=await c.DownloadStringTaskAsync("https://api.github.com/repos/xiaoer2021/commandcode-manager/releases/latest");
-            var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);string tag=Convert.ToString(data["tag_name"]);
-            if(!Regex.IsMatch(tag,@"^v\d+\.\d+\.\d+$")||Convert.ToBoolean(data["draft"])||Convert.ToBoolean(data["prerelease"]))throw new InvalidOperationException("发布版本格式异常");
-            Notes=data.ContainsKey("body")?Convert.ToString(data["body"]):"";if(Notes.Length>50000)Notes=Notes.Substring(0,50000);PublishedAt=data.ContainsKey("published_at")?Convert.ToString(data["published_at"]):"";
+            string finalUrl;var request=(HttpWebRequest)WebRequest.Create("https://github.com/xiaoer2021/commandcode-manager/releases/latest");request.UserAgent="MultiAccountWorkspace-Updater";request.Timeout=60000;using(var response=(HttpWebResponse)await request.GetResponseAsync())finalUrl=response.ResponseUri.AbsoluteUri;
+            string tag=LatestTagFromUrl(finalUrl),feed;using(var c=Client())feed=await c.DownloadStringTaskAsync("https://github.com/xiaoer2021/commandcode-manager/releases.atom");Notes=NotesFromAtom(feed,tag,out PublishedAt);if(Notes.Length>50000)Notes=Notes.Substring(0,50000);
             Latest=tag.Substring(1);string name="CommandCode-Manager-Setup-"+Latest+".exe";assetUrl=null;checksumUrl=null;
-            foreach(Dictionary<string,object> asset in (System.Collections.IEnumerable)data["assets"]) { string n=Convert.ToString(asset["name"]),u=Convert.ToString(asset["browser_download_url"]);if((n==name||n=="SHA256SUMS.txt")&&Trusted(u,Latest,n)){if(n==name){long size=Convert.ToInt64(asset["size"]);if(size<100000||size>268435456)throw new InvalidOperationException("安装包大小异常");assetUrl=u;}else checksumUrl=u;} }
+            assetUrl="https://github.com/xiaoer2021/commandcode-manager/releases/download/"+tag+"/"+name;checksumUrl="https://github.com/xiaoer2021/commandcode-manager/releases/download/"+tag+"/SHA256SUMS.txt";
+            if(!AssetAvailable(assetUrl)||!AssetAvailable(checksumUrl))throw new InvalidOperationException("新版本安装文件尚未上传完整，请稍后重试");
             if(Newer(Latest,current)){if(assetUrl==null||checksumUrl==null)throw new InvalidOperationException("新版本安装文件尚未上传完整，请稍后重试");Status="available";}else Status="current";
         }catch(Exception e){Status="error";Error="检查更新失败："+(e is ArgumentException?"发布信息解析失败，请稍后重试":e.Message);}finally{working=false;Changed();}
     }
+    private static bool AssetAvailable(string url) { var request=(HttpWebRequest)WebRequest.Create(url);request.Method="HEAD";request.UserAgent="MultiAccountWorkspace-Updater";request.Timeout=60000;request.AllowAutoRedirect=true;try{using(var response=(HttpWebResponse)request.GetResponse())return response.StatusCode==HttpStatusCode.OK;}catch(WebException e){var response=e.Response as HttpWebResponse;if(response!=null)response.Dispose();return false;} }
     public async Task Download() {
         if(working||Status!="available")return;working=true;Status="downloading";Progress=0;Error="";Changed();
         try {
