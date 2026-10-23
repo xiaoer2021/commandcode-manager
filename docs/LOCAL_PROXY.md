@@ -1,9 +1,10 @@
 # 本地代理
 在工作台顶部打开“本地代理”，勾选支持 API 的 Command Code 账号，点击开启。将面板中的地址和代理 Key 填入其他软件，默认地址为 `http://127.0.0.1:17766/v1`。代理 Key 是工作台生成的本机访问凭据，与平台 API Key 不同。
 默认选择当前正常局域网网卡地址，保存后可供同网络的其他设备连接。不会修改 VPN、Windows 系统代理、路由、DNS 或证书。上游请求沿用现有网络环境。适用于桌面或后端 API 客户端，不允许网页跨域访问。
-支持模型列表、Chat Completions、Responses 和 Messages；模型必须支持所用接口。账号池支持 Command Code API 套餐及 OpenCode Go / Zen API Key，Command Code Go 不支持 Provider API。
+代理对 `/v1/` 下的 API 路径做原样转发，支持 GET、POST、PUT、PATCH、DELETE、查询参数、JSON / multipart 请求体及 SSE 响应；不再把入口限定为 Chat Completions、Responses、Messages 三条路径。请求需带模型 ID，以便从可用账号中路由；`/v1/models` 用于发现模型，Claude SDK 常见的重复 `/v1/v1/...` 路径会自动归一化。账号池支持 Command Code API 套餐及 OpenCode Go / Zen API Key，Command Code Go 不支持 Provider API。
+这是多账号 API 网关，不是通用 HTTP / SOCKS 代理，也不负责把一种协议转换成另一种协议。它保留客户端原始协议和请求内容，并转到固定的平台 API 地址；具体接口与模型是否可用，仍由对应平台和模型决定。Gemini 原生 `/v1beta/` 路由以及没有模型 ID、无法关联账号的接口暂不支持；不支持的上游接口会返回平台错误，不会伪装成成功。
 OpenCode Go / Zen 可直接请求官方 API，无需另外启动 OpenCode 或 Node。模型列表中的 `opencode-go/`、`opencode-zen/` 前缀用于区分平台，请保留前缀填写；转发时自动转换为官方模型 ID。同一请求只使用支持同一完整模型名和接口的账号，避免意外跨平台计费。
-OpenCode 的公开模型列表不提供协议信息，因此按官方 Go / Zen 文档的接口表校验。当前仅提供已确认支持上述三种接口的模型；原生 Gemini 接口及尚未登记的新模型暂不提供，不自动猜测协议。接口表核实日期：2026-10-14，参考 [Go](https://opencode.ai/docs/go/) 和 [Zen](https://opencode.ai/docs/zen/)。
+OpenCode 的公开模型列表不提供协议信息，因此模型发现仍按官方 Go / Zen 文档登记；登记之外的模型不会加入列表。请求路径会原样转发，最终接口兼容性由 OpenCode 上游决定。参考 [Go](https://opencode.ai/docs/go/) 和 [Zen](https://opencode.ai/docs/zen/)。
 明确额度不足、限流或凭据失效时自动尝试其他账号，保留同一模型。一般网络故障、权限拒绝或已开始输出的请求不会自动重放。建议关闭调用软件自己的自动重试，避免重复提交。
 关闭窗口后可继续托盘运行，彻底退出工作台则代理停止。面板关闭代理会取消正在进行的请求，并要求确认。账号池与 Key 在本机保存，默认关闭；不改变官方客户端登录。
 最近 40 条请求记录只保留在内存，显示账号别名、模型、状态和接口返回的 Token，不保存对话正文。重启清空记录，未返回 Token 时显示缺失，不用费用推算。
