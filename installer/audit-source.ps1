@@ -2,7 +2,9 @@
 $ccRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $ccRoot
 try {
-    $ccFiles = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard)
+    $ccConsoleEncoding = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    try { $ccFiles = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard) } finally { [Console]::OutputEncoding = $ccConsoleEncoding }
     if ($LASTEXITCODE -ne 0 -or $ccFiles.Count -eq 0) { throw '没有可检查的源文件' }
     $ccForbidden = @($ccFiles | Where-Object { $_ -match '(^|/)(desktop|node_modules|sdk|stage[^/]*|downloads|output|release[^/]*|preview[^/]*)/|(^|/)(auth|accounts[^/]*|usage-history)\.json$|\.(ccaccounts|encrypted|exe|dll|zip|log)$' })
     if ($ccForbidden.Count -gt 0) { throw ('发现不应上传的文件：' + ($ccForbidden -join ', ')) }

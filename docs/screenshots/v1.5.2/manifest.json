@@ -1,0 +1,11 @@
+{
+  "version": "1.5.2",
+  "demoData": true,
+  "source": "v1.5.1 proxy panel capture; interface unchanged in v1.5.2",
+  "images": [
+    {
+      "file": "proxy-pool.png",
+      "title": "本地代理账号池"
+    }
+  ]
+}

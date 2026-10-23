@@ -1,32 +1,12 @@
 ## 本次更新
-- 暂不可用、余量不足、凭据失效或尚未确认的账号变灰并禁止单选，全选只选择可用账号。
-- 增加“自动加入账号池”开关：后台检测通过且额度足够时自动加入，额度不足或受限时自动退出；关闭后只保留手动选择的可用账号。
-- 代理默认选择正常局域网网卡地址，优先带网关的物理网卡，移除访问范围下拉框。不自动改动系统代理、VPN、路由或防火墙规则。
-- 修改端口后地址立即更新，标注“待保存”；保存后生效，快速使用只读取已保存的地址。
-- 地址和 Key 的复制按钮移到标题旁，“已复制”反馈直接显示在对应标题后。
-- Key 管理改成独立小弹窗，支持命名生成、复制、启用/禁用与删除。保留原 Key，禁用和删除阻止新请求，不重放或取消已开始输出的回复。
-- 增加“快速使用”：识别已安装 Command Code / OpenCode，导入代理地址、客户端专用 Key 与按协议区分的模型，备份原配置并保留原有账号登录。
-## 快速使用
-开启代理并保存账号池后，点击“快速使用”选择客户端。OpenCode 会配置工作台代理为默认模型；Command Code 会导入 BYOK 服务商和桌面模型分组，重开后在模型中选择“工作台代理”。客户端已运行时提示确认重启，当前任务可能结束；不会静默关闭客户端。
-客户端配置采用保守的 32k 上下文、4k 输出预算，属于客户端设置，不代表上游模型上限。新增平台模型可再次点击快速使用同步。Command Code 桌面版采用受版本结构校验的模型分组补丁，不匹配时保留原文件并报告错误。
-## 验证
-灰色账号禁选、全选排除、端口即时预览、Key 弹窗增删和开关通过界面验证。多 Key 验证、旧 Key 迁移、禁用后的请求拒绝、自动恢复入池、JSON/JSONC 配置合并、加密备份和错误文件保护通过模拟验证。
-客户端配置测试使用临时文件，没有修改本机官方客户端配置，没有消耗真实账号额度测试生成。本机安装更新由用户自行操作，源码和安装包不包含个人账号、Key 或缓存。
 
-## 本次功能界面图
+- 扩展本地 API 网关：不再将请求限定为 Chat Completions、Responses、Messages 三条路由，可透传 `/v1/` 下由上游处理的 API 路径和 GET、POST、PUT、PATCH、DELETE 请求。
+- 保留查询参数、JSON 与 multipart 请求体、SSE 响应及常见 SDK 协议头，适配更多调用工具和接口形态。
+- 自动归一化 Claude SDK 常见的重复 `/v1/v1/...` 路径，并继续按模型 ID 选择账号和执行额度切换。
+- 更新本地代理使用说明，明确固定平台上游、协议透传边界和不支持的请求类型。
 
-以下截图来自 v1.5.1 模拟账号，不包含个人账号或真实 Key。图中回环地址和端口仅用于隔离演示。
+![本地代理账号池](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.2/proxy-pool.png)
 
-### 账号池与自动加入
+## 使用说明
 
-![账号池与自动加入](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/proxy-pool.png)
-
-### 独立代理 Key 管理
-
-![独立代理 Key 管理](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/proxy-keys.png)
-
-### 快速使用
-
-![快速使用](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.1/quick-use.png)
-
-[查看完整界面与操作图](https://github.com/xiaoer2021/commandcode-manager/blob/main/docs/screenshots/v1.5.1/README.md)
+这是 Command Code 与 OpenCode Go / Zen 的 API 网关，不是通用 HTTP / SOCKS 代理，也不负责在不同厂商之间转换协议。接口能否调用仍取决于对应平台、模型和上游 API 能力；Gemini 原生 `/v1beta/` 路由及无法关联模型 ID 的接口暂不支持。已开始输出的请求不会跨账号重放。
