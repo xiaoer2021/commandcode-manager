@@ -225,7 +225,14 @@ public class DesktopForm : Form {
     private object State() {
         lock (gate) return new { accounts = store.Accounts.Select(a => new { id = a.Id, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, DateTimeOffset.UtcNow).Select(value => value.Text).ToArray() }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) };
     }
-    private void Send(object message) { if (ready && view != null) view.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(message)); }
+    private void Send(object message) {
+        if(!ready)return;
+        WebView2 target=view;if(target==null||target.IsDisposed)return;
+        string json=new JavaScriptSerializer().Serialize(message);
+        Action post=()=>{if(!ready||target.IsDisposed)return;CoreWebView2 core=target.CoreWebView2;if(core!=null)core.PostWebMessageAsJson(json);};
+        if(target.InvokeRequired){try{target.BeginInvoke(post);}catch(InvalidOperationException){}return;}
+        post();
+    }
     private void Push() { Send(new { kind = "state", state = State() }); }
     private void Save() { if (verifying || liveVerify) return; lock (gate) Core.AtomicWrite(file, new JavaScriptSerializer {MaxJsonLength=8388608}.Serialize(store)); }
     private void SyncOfficial() {

@@ -1,8 +1,6 @@
 ## 本次更新
 
-- 认证失败的账号会将“启用账号”按钮改为“重新认证”，可直接原位更新凭据，无需删除并重新添加。
-- 认证恢复入口支持 Command Code 浏览器授权或新 API Key；OpenCode Go 可更新 API Key。
-- 新凭据验证通过后才会替换；失败时保留旧凭据、账号备注及本地 Token 历史。
-- 普通账号仍显示原有的平台启用操作。
+- 修复账号重新认证时的界面线程错误，后台验证进度和结果会安全返回工作台。
+- 认证失败账号可从列表直接重新认证；验证通过后原位更新凭据，保留账号记录、备注及本地 Token 历史。
 
-![本地代理账号池](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.8/proxy-pool.png)
+![本地代理账号池](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.9/proxy-pool.png)
