@@ -113,10 +113,10 @@ public class Alert {
 }
 public class ApiFailure : InvalidOperationException {
     public int StatusCode { get; private set; }
-    public ApiFailure(int status) : base(status==401?"登录凭据已失效":status==403?"此账号没有访问权限":"官方接口 HTTP "+status) { StatusCode=status; }
+    public ApiFailure(int status) : base(status==401?"官方接口拒绝认证（HTTP 401）；凭据可能已过期或撤销，也可能是服务端验证接口变化":status==403?"此账号没有访问权限":"官方接口 HTTP "+status) { StatusCode=status; }
 }
 public static class Core {
-    public static string CredentialLabel(string state) { switch(state) { case "configured":return "已配置";case "valid":return "可用";case "limited":return "用量受限";case "invalid":return "已失效";case "forbidden":return "权限不足";case "network":return "网络异常";case "error":return "检测异常";default:return "待检测"; } }
+    public static string CredentialLabel(string state) { switch(state) { case "configured":return "已配置";case "valid":return "可用";case "limited":return "用量受限";case "invalid":return "认证失败";case "forbidden":return "权限不足";case "network":return "网络异常";case "error":return "检测异常";default:return "待检测"; } }
     public static string CredentialFailure(Exception error) { ApiFailure api=error as ApiFailure; if(api!=null&&api.StatusCode==401)return "invalid";if(api!=null&&api.StatusCode==403)return "forbidden";return error.Message.Contains("超时")||error.Message.Contains("无法连接")?"network":"error"; }
     public static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
     private static readonly HttpClient Http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
@@ -284,7 +284,7 @@ public sealed class LoginFlow : IDisposable {
         byte[] bytes = new byte[32]; using (RandomNumberGenerator random = RandomNumberGenerator.Create()) random.GetBytes(bytes);
         State = Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
         listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
-        string callback = "http://127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port + "/callback";
+        string callback = "http://localhost:" + ((IPEndPoint)listener.LocalEndpoint).Port + "/callback";
         Url = "https://commandcode.ai/studio/auth/cli?callback=" + Uri.EscapeDataString(callback) + "&state=" + State + "&mode=redirect";
         stop.CancelAfter(TimeSpan.FromMinutes(5)); stop.Token.Register(() => listener.Stop());
     }
