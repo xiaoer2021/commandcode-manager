@@ -340,6 +340,27 @@ public class DesktopForm : Form {
         Save(); Schedule(); Push(); WarmHistory(store.Accounts.FirstOrDefault(a=>a.Data!=null&&a.Data.UserId==data.UserId&&a.Data.OrgId==data.OrgId));
         } finally {addingAccount=false;}
     }
+    private async Task ReplaceCredential(Account account,string replacement) {
+        if(addingAccount||busy||refreshingAccounts.Count>0||localProxy.InFlight>0)throw new InvalidOperationException("当前有账号刷新或代理请求，请完成后再更新凭据");
+        if(account==null||!store.Accounts.Contains(account))throw new InvalidOperationException("账号不存在");
+        addingAccount=true;refreshingAccounts.Add(account.Id);Push();
+        try {
+            bool openCodeAccount=OpenCodeService.IsOpenCode(account);
+            if(openCodeAccount)replacement=new JavaScriptSerializer().Serialize(OpenCodeService.ParseValue(replacement));
+            else {if(string.IsNullOrWhiteSpace(replacement)||replacement.Length>8192||replacement.Contains("\n")||replacement.Contains("\r"))throw new InvalidOperationException("请填写有效 API Key");replacement=replacement.Trim();}
+            if(keys.Any(pair=>pair.Key!=account.Id&&pair.Value==replacement))throw new InvalidOperationException("这个凭据已关联到其他账号");
+            if(keys.ContainsKey(account.Id)&&keys[account.Id]==replacement)throw new InvalidOperationException("新凭据与当前凭据相同");
+            Send(new{kind="addProgress",message="正在验证新凭据…"});
+            AccountData data;
+            if(openCodeAccount){Account probe=new Account{Id=account.Id,Platform=account.Platform,ProviderId=account.ProviderId};data=await openCode.Fetch(probe,replacement);}
+            else data=await Task.Run(()=>Core.Fetch(replacement,value=>Send(new{kind="addProgress",message=value})));
+            if(!openCodeAccount&&account.Data!=null&&(!string.IsNullOrEmpty(account.Data.UserId)&&account.Data.UserId!=data.UserId||!string.IsNullOrEmpty(account.Data.OrgId)&&account.Data.OrgId!=data.OrgId))throw new InvalidOperationException("新凭据对应的账号或组织与当前记录不同，原凭据和记录均未更改");
+            string oldSecret=account.Secret,oldCredential=account.CredentialState,oldChecked=account.CredentialCheckedAt,oldMessage=account.CredentialMessage,oldError=account.Error,oldOpenCodeId=account.OpenCodeCredentialId;AccountData oldData=account.Data;string oldKey;keys.TryGetValue(account.Id,out oldKey);
+            lock(gate){account.Secret=Core.Encrypt(replacement);keys[account.Id]=replacement;account.Data=data;account.Error=null;account.CredentialState=openCodeAccount?(data.Status=="configured"?"configured":"valid"):((data.Error??"").Contains("访问权限")||(data.TokenError??"").Contains("访问权限")?"limited":"valid");account.CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o");account.CredentialMessage=openCodeAccount&&data.Status=="configured"?"凭据已更新；有效性由 OpenCode 官方授权或请求结果确认":string.IsNullOrEmpty(data.Error)?"新凭据验证通过":data.Error;if(openCodeAccount)account.OpenCodeCredentialId=null;}
+            try{Save();}catch{lock(gate){account.Secret=oldSecret;account.CredentialState=oldCredential;account.CredentialCheckedAt=oldChecked;account.CredentialMessage=oldMessage;account.Error=oldError;account.Data=oldData;account.OpenCodeCredentialId=oldOpenCodeId;if(oldKey==null)keys.Remove(account.Id);else keys[account.Id]=oldKey;}throw;}
+            Schedule();SyncProxyPool();Push();if(!openCodeAccount)WarmHistory(account);
+        } finally {refreshingAccounts.Remove(account.Id);addingAccount=false;Push();}
+    }
     private async Task<string> ExportAccounts(Dictionary<string,object> payload) {
         if(transferBusy)throw new InvalidOperationException("账号包操作正在进行");
         var values=Core.Value(payload,"accountIds") as System.Collections.IEnumerable;if(values==null||values is string)throw new InvalidOperationException("请选择需要导出的账号");
@@ -418,6 +439,11 @@ public class DesktopForm : Form {
                 case "chooseAccountFile": if(transferBusy)throw new InvalidOperationException("账号包操作正在进行");using(OpenFileDialog dialog=new OpenFileDialog{Title="选择加密账号包",Filter="加密账号包 (*.ccaccounts)|*.ccaccounts",CheckFileExists=true,RestoreDirectory=true}){if(dialog.ShowDialog(this)==DialogResult.OK){importFile=dialog.FileName;Send(new{kind="reply",id=id,ok=true,fileName=Path.GetFileName(importFile),state=State()});return;}}message="已取消选择";break;
                 case "importAccounts": message=await ImportAccounts(Core.Text(payload,"password"));break;
                 case "exportUsage": message=await ExportUsage(Find(Core.Text(payload,"accountId")),Query(payload));break;
+                case "replaceCredential": Account replacementAccount=Find(Core.Text(payload,"accountId"));string replacement=OpenCodeService.IsOpenCode(replacementAccount)?OpenCodeService.KeyValue(Core.Text(payload,"key")):Core.Text(payload,"key");await ReplaceCredential(replacementAccount,replacement);message="凭据已原位更新，账号信息和历史记录已保留";break;
+                case "replaceLogin":
+                    if(login!=null)throw new InvalidOperationException("请先完成当前登录");
+                    Account loginAccount=Find(Core.Text(payload,"accountId"));if(OpenCodeService.IsOpenCode(loginAccount))throw new InvalidOperationException("OpenCode 请使用新的 API Key 更新凭据");
+                    using(login=new LoginFlow()){Push();try{Task<string> waiting=login.Wait();Process.Start(new ProcessStartInfo(login.Url){UseShellExecute=true});await ReplaceCredential(loginAccount,await waiting);}finally{login=null;Push();}}break;
                 case "add": await Add(Core.Text(payload, "key"), Core.Text(payload, "name"), "api"); break;
                 case "import": if (!File.Exists(authFile)) throw new InvalidOperationException("未发现本机登录账号"); await Add(Core.Text(new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(authFile)), "apiKey"), Core.Text(payload, "name"), "import"); break;
                 case "login":
