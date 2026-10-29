@@ -1,8 +1,8 @@
 ## 本次更新
 
-- 新增账号凭据原位更新：在账号详情中重新授权或更换 API Key，通过验证后更新凭据，不需要删除并重新添加账号。
-- 更新失败时保留原凭据、账号记录、备注和本地 Token 历史；Command Code 会核对账号身份，避免把其他账号的凭据写入原记录。
-- OpenCode Go 更新凭据时会通过官方用量接口检查；过期或撤销的凭据需要先在对应官方平台重新授权或生成新 Key。
-- 保留 Command Code 登录回调稳定性修复及更清晰的认证错误说明。
+- 认证失败的账号会将“启用账号”按钮改为“重新认证”，可直接原位更新凭据，无需删除并重新添加。
+- 认证恢复入口支持 Command Code 浏览器授权或新 API Key；OpenCode Go 可更新 API Key。
+- 新凭据验证通过后才会替换；失败时保留旧凭据、账号备注及本地 Token 历史。
+- 普通账号仍显示原有的平台启用操作。
 
-![本地代理账号池](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.7/proxy-pool.png)
+![本地代理账号池](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.8/proxy-pool.png)
