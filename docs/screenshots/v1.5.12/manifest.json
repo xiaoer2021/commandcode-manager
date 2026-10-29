@@ -1,0 +1,11 @@
+{
+  "version": "1.5.12",
+  "demoData": true,
+  "source": "代理池界面未改动；截图为演示数据",
+  "images": [
+    {
+      "file": "proxy-pool.png",
+      "title": "本地代理账号池"
+    }
+  ]
+}
