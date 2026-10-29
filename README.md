@@ -4,7 +4,7 @@
 
 支持 **Command Code** 和 **OpenCode Go / Zen**。适合持有多个账号、需要关注额度变化，或希望通过统一 API 地址使用账号池的用户。
 
-[下载安装](https://github.com/xiaoer2021/commandcode-manager/releases/latest) · [界面与操作图](docs/screenshots/v1.5.1/README.md) · [本地代理使用说明](docs/LOCAL_PROXY.md)
+[下载安装](https://github.com/xiaoer2021/commandcode-manager/releases/latest) · [界面与操作图](docs/screenshots/v1.5.1/README.md) · [本地代理使用说明](docs/LOCAL_PROXY.md) · [代理池统计 API 与 OpenAPI 文档](docs/PROXY_USAGE_API.md)
 
 [![多账号工作台总览](docs/screenshots/v1.5.1/overview.png)](https://raw.githubusercontent.com/xiaoer2021/commandcode-manager/main/docs/screenshots/v1.5.1/overview.png)
 
@@ -21,6 +21,7 @@
 | 本地 API 代理 | 使用统一地址和代理 Key；在请求开始前遇到明确限额时尝试其他兼容账号 |
 | 自动账号池 | 可用账号自动加入，额度不足或受限账号退出，恢复后重新参与 |
 | 多 Key 管理 | 为不同设备生成独立 Key，支持复制、禁用和删除 |
+| 代理池统计 API | 向其他程序提供只读的账号额度、Token 历史、代理状态和请求概况，并附完整 OpenAPI 文档 |
 | 快速使用 | 将代理地址与模型配置到 Command Code / OpenCode，减少手动配置 |
 | 托盘运行 | 关闭主窗口后继续监控，通过托盘刷新用量或启用账号 |
 

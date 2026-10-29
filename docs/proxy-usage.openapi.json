@@ -1,0 +1,77 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "多账号工作台代理池只读统计 API",
+    "version": "1.0.0",
+    "description": "通过工作台本地代理 Key 读取代理运行状态、账号额度与 Token 汇总、已缓存的时间粒度历史及最近代理请求。所有接口只读，不会触发上游刷新，也不会返回账号 API Key、邮箱、提示词或请求正文。"
+  },
+  "paths": {
+    "/v1/workspace": {
+      "get": {
+        "operationId": "getWorkspaceStatus",
+        "summary": "读取工作台与代理池状态",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "responses": {"200": {"description": "代理与账号池摘要", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceStatus"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    },
+    "/v1/workspace/status": {
+      "get": {
+        "operationId": "getWorkspaceStatusAlias",
+        "summary": "读取工作台与代理池状态（别名）",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "responses": {"200": {"description": "代理与账号池摘要", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceStatus"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    },
+    "/v1/workspace/accounts": {
+      "get": {
+        "operationId": "listWorkspaceAccounts",
+        "summary": "读取每个账号的额度、剩余量和 Token 汇总",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "parameters": [{"name": "pool_only", "in": "query", "required": false, "schema": {"type": "boolean", "default": false}, "description": "设为 true 只返回当前代理池账号；默认返回工作台中所有已登记账号。"}],
+        "responses": {"200": {"description": "账号用量快照", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountList"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    },
+    "/v1/workspace/usage": {
+      "get": {
+        "operationId": "getWorkspaceUsage",
+        "summary": "读取 Token 汇总或缓存的日、周、月明细",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "parameters": [{"name": "account_id", "in": "query", "required": false, "schema": {"type": "string"}, "description": "省略时返回所有账号 Token 汇总；提供时返回该账号已缓存时间序列。"}, {"name": "grain", "in": "query", "required": false, "schema": {"type": "string", "enum": ["day", "week", "month"], "default": "day"}}, {"name": "page", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 60, "default": 0}, "description": "0 为最近一页。"}, {"name": "start", "in": "query", "required": false, "schema": {"type": "string", "format": "date"}}, {"name": "end", "in": "query", "required": false, "schema": {"type": "string", "format": "date"}}],
+        "responses": {"200": {"description": "账号 Token 汇总或时间桶", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}, "404": {"$ref": "#/components/responses/NotFound"}, "503": {"$ref": "#/components/responses/HistoryUnavailable"}}
+      }
+    },
+    "/v1/workspace/requests": {
+      "get": {
+        "operationId": "listRecentProxyRequests",
+        "summary": "读取最近代理请求的脱敏元数据",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 40, "default": 40}}],
+        "responses": {"200": {"description": "最近最多 40 条请求；进程退出后清空", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    },
+    "/v1/workspace/openapi.json": {
+      "get": {
+        "operationId": "getWorkspaceOpenApi",
+        "summary": "读取本接口的 OpenAPI 3 文档",
+        "security": [{"proxyBearer": []}, {"proxyApiKey": []}],
+        "responses": {"200": {"description": "OpenAPI JSON 文档", "content": {"application/json": {"schema": {"type": "object"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "proxyBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "workspace proxy Key"},
+      "proxyApiKey": {"type": "apiKey", "in": "header", "name": "x-api-key"}
+    },
+    "responses": {
+      "Unauthorized": {"description": "代理 Key 缺失、错误、已禁用或已删除。"},
+      "BadRequest": {"description": "查询参数无效。"},
+      "NotFound": {"description": "账号不存在或接口路径未知。"},
+      "HistoryUnavailable": {"description": "本机历史缓存或 OpenCode 数据库当前不可读。"}
+    },
+    "schemas": {
+      "WorkspaceStatus": {"type": "object", "properties": {"schema_version": {"type": "string"}, "generated_at": {"type": "string", "format": "date-time"}, "proxy": {"type": "object", "properties": {"running": {"type": "boolean"}, "base_url": {"type": "string"}, "bind_address": {"type": "string"}, "port": {"type": "integer"}, "requests_since_start": {"type": "integer"}, "in_flight": {"type": "integer"}, "recent_request_capacity": {"type": "integer"}}}, "accounts": {"type": "object", "properties": {"managed": {"type": "integer"}, "in_proxy_pool": {"type": "integer"}, "ready": {"type": "integer"}, "unavailable": {"type": "integer"}, "outside_pool": {"type": "integer"}}}}},
+      "AccountList": {"type": "object", "properties": {"schema_version": {"type": "string"}, "generated_at": {"type": "string", "format": "date-time"}, "count": {"type": "integer"}, "accounts": {"type": "array", "items": {"type": "object", "description": "含 account_id、name、platform、provider、availability、in_proxy_pool、balance、quotas、tokens、billing 与数据更新时间；不含凭据、邮箱或请求正文。"}}}}
+    }
+  }
+}
