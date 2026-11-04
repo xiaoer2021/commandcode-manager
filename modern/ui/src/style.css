@@ -84,3 +84,16 @@ main{gap:13px}header{height:96px;padding-bottom:9px}.window-controls button{heig
 @media(max-width:1120px){.table-head,.account-row{grid-template-columns:minmax(124px,.95fr) minmax(76px,.6fr) minmax(132px,1fr) minmax(120px,.95fr) minmax(120px,.95fr) minmax(72px,.54fr) minmax(126px,.96fr) 56px 80px;gap:7px}.opencode-panel:not(.cards-panel) .table-head,.opencode-panel:not(.cards-panel) .account-row{grid-template-columns:minmax(124px,.95fr) minmax(76px,.6fr) minmax(132px,1fr) minmax(120px,.95fr) minmax(120px,.95fr) minmax(72px,.54fr) minmax(126px,.96fr) 80px;gap:7px}}
 .forecast-cell .spark-label{font-size:8px;line-height:1.2;color:#7b8fa8;white-space:nowrap}
 .card-grid .forecast-cell .spark-label{font-size:9.5px;color:#617d9d}
+
+.forecast-cell{display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:0}
+.forecast-head{display:flex;align-items:baseline;gap:5px;min-width:0}
+.forecast-chart{display:flex;flex-direction:column;gap:2px;min-width:0}
+.forecast-chart .spark{display:block;color:#1180ee}
+.forecast-cell .spark-label{display:block;font-size:8px;line-height:1.2;color:#7b8fa8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.forecast-cell .spark-peak{display:none;font-style:normal}
+.card-grid .forecast-cell{grid-column:1 / -1;grid-row:4;flex-direction:row;align-items:center;gap:14px;border-top:1px solid #e3ecf7;padding-top:6px;margin-top:2px}
+.card-grid .forecast-head{flex-direction:column;align-items:flex-start;gap:2px;flex-shrink:0}
+.card-grid .forecast-chart{flex:1;flex-direction:row;align-items:center;gap:10px}
+.card-grid .forecast-chart .spark{flex:1;width:auto;height:34px}
+.card-grid .forecast-cell .spark-label{font-size:9.5px;color:#617d9d;white-space:nowrap}
+.card-grid .forecast-cell .spark-peak{display:inline}

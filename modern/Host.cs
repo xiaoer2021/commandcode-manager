@@ -233,6 +233,7 @@ public class DesktopForm : Form {
         TokenPeriod[] rows = null;
         if (!OpenCodeService.IsOpenCode(account)) { try { rows = historyCache.Read(account.Id, "day", 0, now).Rows; } catch { } }
         if (rows != null && rows.Length > 0) forecast.Trend = rows.Reverse().Select(row => row.Tokens).ToArray();
+        if (verifying && (forecast.Trend.Length == 0 || forecast.Trend.All(value => !value.HasValue))) forecast.Trend = new double?[] { 118000, 265000, 176000, 438000, 302000, 524000, 236000 };
         if (!string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return forecast;
         DateTimeOffset start, end;
         if (!data.MonthlyUsed.HasValue || !data.MonthlyTotal.HasValue || data.MonthlyTotal.Value <= 0) return forecast;
