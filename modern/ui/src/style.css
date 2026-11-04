@@ -97,3 +97,8 @@ main{gap:13px}header{height:96px;padding-bottom:9px}.window-controls button{heig
 .card-grid .forecast-chart .spark{flex:1;width:auto;height:34px}
 .card-grid .forecast-cell .spark-label{font-size:9.5px;color:#617d9d;white-space:nowrap}
 .card-grid .forecast-cell .spark-peak{display:inline}
+.spark-wrap{position:relative;display:block}
+.spark-tip{position:fixed;z-index:240;transform:translate(-50%,-135%);background:#1e2d45;color:#fff;font-size:10px;line-height:1.35;padding:3px 7px;border-radius:5px;white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px #10233a45}
+.spark-tip:after{content:'';position:absolute;left:50%;top:100%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e2d45}
+.card-grid .forecast-chart .spark-wrap{flex:1;width:auto!important;height:34px}
+.card-grid .forecast-chart .spark{width:100%;height:100%}
