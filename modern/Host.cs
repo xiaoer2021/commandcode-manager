@@ -39,6 +39,8 @@ public class DesktopForm : Form {
     private readonly string appDir = Path.GetDirectoryName(typeof(DesktopForm).Assembly.Location);
     private readonly string deployedDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui");
     private readonly string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "commandcode-account-manager", "accounts-native.json");
+    private readonly string proxyLog;
+    private MiniWindow mini;
     private readonly string authFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".commandcode", "auth.json");
     private readonly Dictionary<string, string> keys = new Dictionary<string, string>();
     private readonly object gate = new object();
@@ -91,10 +93,11 @@ public class DesktopForm : Form {
         if (test) { file = Path.Combine(Path.GetTempPath(), "commandcode-react-test-" + Guid.NewGuid().ToString("N"), "accounts.json"); store = new Store(); Seed(); }
         else { store = File.Exists(file) ? new JavaScriptSerializer {MaxJsonLength=8388608}.Deserialize<Store>(File.ReadAllText(file)) : new Store(); if (store == null || store.Accounts == null || store.Settings == null) throw new InvalidOperationException("账号数据格式异常，原文件已保留"); }
         if(!test&&!live&&store.Settings.WindowHeight>0){ClientSize=new Size(Math.Max(MinimumSize.Width,Math.Min((int)(store.Settings.WindowWidth*dpiScale),desktopArea.Width-40)),Math.Max(MinimumSize.Height,Math.Min((int)(store.Settings.WindowHeight*dpiScale),desktopArea.Height-40)));}
-        historyCache=new TokenHistoryCache(Path.Combine(Path.GetDirectoryName(file),"usage-history.json"));
+        historyCache=new TokenHistoryCache(Path.Combine(Path.GetDirectoryName(file),"usage-history.json"));proxyLog=Path.Combine(Path.GetDirectoryName(file),"proxy-requests.jsonl");
         foreach (Account account in store.Accounts) { try { keys[account.Id] = Core.Decrypt(account.Secret); } catch { account.Error = "凭据无法解密，请用原 Windows 用户或重新登录"; } }
         if(store.Proxy==null)store.Proxy=new ProxySettings();ProxyWorkspace.Normalize(store.Proxy);
         localProxy=new LocalProxy(ProxyAccounts,verifying?new ProxyVerificationHandler():null);localProxy.WorkspaceApi=WorkspaceApi;localProxy.RequireLan=!test&&!live;localProxy.RequireVerifiedAccounts=true;localProxy.Changed=()=>{if(!IsDisposed&&!quitting)try{BeginInvoke(new Action(Push));}catch(InvalidOperationException){}};
+        if(!test&&!live){try{localProxy.LoadRecords(ReadProxyRecords());}catch{} localProxy.Recorded=record=>{if(!quitting)AppendProxyRecord(record);};}
         try{string lan=verifying||liveVerify?"127.0.0.1":LocalProxy.DefaultLanAddress();if(lan==null)throw new InvalidOperationException();store.Proxy.BindAddress=lan;localProxy.Configure(store.Proxy.Port,ProxyWorkspace.Primary(store.Proxy),store.Proxy.AccountIds,!test&&!live&&store.Proxy.Enabled,lan);localProxy.SetAccessKeys(ProxyWorkspace.EnabledKeys(store.Proxy));}catch(Exception){localProxy.Error="未检测到可用局域网或代理 Key，请检查网络后重新开启";}
 
         if (!test && !live && store.Settings.OfficialUsagePanel) { IdentifyActive(); Account migrated = store.Accounts.FirstOrDefault(a => a.Id == activeId); if (migrated != null) migrated.OfficialUsagePanel = true; store.Settings.OfficialUsagePanel = false; Save(); }
@@ -102,7 +105,7 @@ public class DesktopForm : Form {
         if (!test && !live && (store.Accounts.Any(a=>a.OfficialUsagePanel&&!OpenCodeService.IsOpenCode(a)) || OfficialUsage.IsInstalled())) { try { InstallOfficial(); } catch { } }
         using(Stream logo=typeof(DesktopForm).Assembly.GetManifestResourceStream("CommandCodeManager.Icon")) { if(logo!=null) using(Icon embedded=new Icon(logo,new Size(64,64))) Icon=(Icon)embedded.Clone(); }
         tray.Icon = Icon ?? SystemIcons.Application; tray.Text = "多账号工作台"; tray.Visible = !test && !live;
-        ContextMenuStrip menu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9), ShowImageMargin = false }; menu.Opening += (s,e) => BuildTrayMenu(menu); tray.ContextMenuStrip = menu; BuildTrayMenu(menu); tray.DoubleClick += async (s, e) => await ShowWindow(); tray.BalloonTipClicked += async (s, e) => await ShowWindow();
+        ContextMenuStrip menu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9), ShowImageMargin = false, Renderer = new TrayMenuRenderer(), Padding = new Padding(0, 5, 0, 5) }; menu.Opening += (s,e) => BuildTrayMenu(menu); tray.ContextMenuStrip = menu; BuildTrayMenu(menu); tray.DoubleClick += async (s, e) => await ShowWindow(); tray.BalloonTipClicked += async (s, e) => await ShowWindow();
         refreshTimer.Tick += async (s, e) => await RefreshAll(); Schedule();
         reloadTimer.Interval = 500; reloadTimer.Tick += (s, e) => { if (busy || login != null || switching.Count > 0) return; reloadTimer.Stop(); if (ready && view != null) view.CoreWebView2.Reload(); };
         if (Directory.Exists(deployedDir)) { watcher = new FileSystemWatcher(deployedDir, "version.txt"); watcher.Changed += (s, e) => BeginInvoke(new Action(() => { reloadTimer.Stop(); reloadTimer.Start(); })); watcher.EnableRaisingEvents = true; }
@@ -114,14 +117,14 @@ public class DesktopForm : Form {
         updater.Changed=()=>{if(!IsDisposed&&!quitting)try{BeginInvoke(new Action(Push));}catch(InvalidOperationException){}};
         renewalTimer.Interval=60000;renewalTimer.Tick+=(s,e)=>{bool changed=false;foreach(Account a in store.Accounts.Where(x=>!string.IsNullOrEmpty(x.RenewalAt)).ToArray()){string before=string.Join("|",a.AlertIds??new List<string>());Notify(a);changed|=before!=string.Join("|",a.AlertIds);}if(changed){Save();Push();}if(!test&&!live){SyncProxyPool();Push();}};
         updateTimer.Interval=60000;updateTimer.Tick+=async(s,e)=>await updater.CheckAutomatically(appVersion);
-        Shown += async (s, e) => { await InitView(); if (!test&&!live){updateTimer.Start();renewalTimer.Start();Task ignored=updater.CheckAutomatically(appVersion);} if (!test) await RefreshAll(); };
+        Shown += async (s, e) => { await InitView(); if(!test&&!live&&store.Settings.MiniWindow)ShowMini(); if (!test&&!live){updateTimer.Start();renewalTimer.Start();Task ignored=updater.CheckAutomatically(appVersion);} if (!test) await RefreshAll(); };
         Activated += (s, e) => { if (!verifying) IdentifyActive(); Push(); };
         bool wasMaximized=false;Resize+=(s,e)=>{bool maximized=WindowState==FormWindowState.Maximized;if(maximized!=wasMaximized){wasMaximized=maximized;Push();}};
         ResizeBegin+=(s,e)=>{resizeStartSize=ClientSize;};
         ResizeEnd+=(s,e)=>{if(ready&&WindowState==FormWindowState.Normal&&ClientSize!=resizeStartSize){resizePrompt=true;if(!verifying&&!liveVerify){double scale=GetDpiForWindow(Handle)/96.0;store.Settings.WindowWidth=(int)Math.Round(ClientSize.Width/scale);store.Settings.WindowHeight=(int)Math.Round(ClientSize.Height/scale);Save();}Push();}};
         FormClosing += (s, e) => {
             if (!quitting && !verifying && !liveVerify) { e.Cancel = true; resizePrompt=false;if(openCodeAttempt!=null){string cancelPath="/api/integration/"+Uri.EscapeDataString(openCodeAttemptProvider)+"/connect/oauth/"+Uri.EscapeDataString(openCodeAttempt);openCodeAttempt=null;openCodeAttemptProvider=null;Task.Run(async()=>{try{await openCode.Api(cancelPath,"DELETE");}catch{}});} Hide(); DisposeView(); }
-            else { renewalTimer.Stop(); updateTimer.Stop(); refreshTimer.Stop(); reloadTimer.Stop(); if (login != null) login.Dispose(); if (watcher != null) watcher.Dispose(); if (authWatcher != null) authWatcher.Dispose(); DisposeView();localProxy.Dispose();openCode.Dispose(); tray.Dispose(); }
+            else { renewalTimer.Stop(); updateTimer.Stop(); refreshTimer.Stop(); reloadTimer.Stop(); if (mini != null) { mini.Dispose(); mini = null; } if (login != null) login.Dispose(); if (watcher != null) watcher.Dispose(); if (authWatcher != null) authWatcher.Dispose(); DisposeView();localProxy.Dispose();openCode.Dispose(); tray.Dispose(); }
         };
         if ((!test && !live) || hot) Task.Run(() => ControlServer());
     }
@@ -142,30 +145,152 @@ public class DesktopForm : Form {
     private async Task ShowWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); await InitView(); Push(); if(!verifying&&!liveVerify){Task ignored=updater.CheckAutomatically(appVersion);} }
     private ToolStripMenuItem TrayAction(string text, Func<Task> action, bool enabled = true) {
         ToolStripMenuItem item = new ToolStripMenuItem(text) { Enabled = enabled };
-        item.Click += async (s,e) => { try { await action(); } catch(Exception error) { tray.BalloonTipTitle="多账号工作台"; tray.BalloonTipText=error.Message; tray.ShowBalloonTip(5000); } };
+        item.Click += async (s,e) => { try { await action(); } catch(Exception error) { tray.BalloonTipIcon=ToolTipIcon.Error; tray.BalloonTipTitle="多账号工作台"; tray.BalloonTipText=error.Message; tray.ShowBalloonTip(5000); } };
+        return item;
+    }
+    private ToolStripMenuItem TrayInfo(string text) {
+        ToolStripMenuItem item = new ToolStripMenuItem(text) { Enabled = false, Padding = new Padding(10, 5, 14, 5) };
+        return item;
+    }
+    private ToolStripMenuItem TrayItem(string text, Func<Task> action, bool enabled = true) {
+        ToolStripMenuItem item = TrayAction(text, action, enabled);
+        item.Padding = new Padding(10, 5, 14, 5);
         return item;
     }
     private void BuildTrayMenu(ContextMenuStrip menu) {
         while(menu.Items.Count>0) { ToolStripItem old=menu.Items[0]; menu.Items.RemoveAt(0); old.Dispose(); }
+        Overview overview=ReadOverview();
         Account current=store.Accounts.FirstOrDefault(a=>a.Id==activeId);
-        menu.Items.Add(new ToolStripMenuItem("当前账号："+(current==null?"未匹配":current.Name)) { Enabled=false });
+        ToolStripMenuItem header=new ToolStripMenuItem(current==null?"当前账号 · 未匹配":"当前账号 · "+current.Name){Enabled=false,Padding=new Padding(10,6,14,6)};header.Font=new Font(menu.Font,FontStyle.Bold);menu.Items.Add(header);
         AccountData quota=current==null?null:current.Data;
-        menu.Items.Add(new ToolStripMenuItem("剩余额度："+(quota==null?"暂无数据":Core.Money(quota.Remaining))));
-        menu.Items.Add(new ToolStripMenuItem("订阅周期已用："+(quota==null?"暂无数据":Core.Money(quota.MonthlyUsed)+" / "+Core.Money(quota.MonthlyTotal))));
-        menu.Items.Add(new ToolStripMenuItem("5 小时已用："+TrayWindowQuota(quota==null?null:quota.FiveHour,quota)));
-        menu.Items.Add(new ToolStripMenuItem("每周已用："+TrayWindowQuota(quota==null?null:quota.Weekly,quota)));
-        if(current!=null&&!string.IsNullOrEmpty(current.Error))menu.Items.Add(new ToolStripMenuItem("同步异常，以上为最近记录"));
+        menu.Items.Add(TrayInfo("余额 "+(quota==null?"暂无数据":Core.Money(quota.Remaining))+" · 预计 "+(overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast))+" Token"));
+        menu.Items.Add(TrayInfo("5 小时 "+TrayWindowQuota(quota==null?null:quota.FiveHour,quota)+" · 每周 "+TrayWindowQuota(quota==null?null:quota.Weekly,quota)));
+        menu.Items.Add(TrayInfo("月度 "+TrayWindowQuota(quota==null?null:new WindowUsage{Used=quota.MonthlyUsed,Cap=quota.MonthlyTotal},quota)+" · "+overview.Accounts+" 个账号"+(overview.Attention>0?" · "+overview.Attention+" 个待关注":"")));
+        menu.Items.Add(TrayInfo(ExpiryText(overview)));
+        if(current!=null&&!string.IsNullOrEmpty(current.Error))menu.Items.Add(TrayInfo("同步异常，以上为最近记录"));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(TrayAction("刷新当前账号",()=>RefreshOne(current,new HistoryQuery{Grain="day",Page=0}),current!=null&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
-        menu.Items.Add(TrayAction("刷新并检测全部账号",RefreshAll,store.Accounts.Count>0&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
+        menu.Items.Add(TrayItem("刷新当前账号",()=>RefreshOne(current,new HistoryQuery{Grain="day",Page=0}),current!=null&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
+        menu.Items.Add(TrayItem("刷新并检测全部账号",RefreshAll,store.Accounts.Count>0&&!busy&&!transferBusy&&refreshingAccounts.Count==0));
         ToolStripMenuItem accounts=new ToolStripMenuItem("快速切换账号");
+        accounts.Padding=new Padding(10,5,14,5);
         foreach(Account account in store.Accounts) {
-            Account target=account; ToolStripMenuItem item=TrayAction((OpenCodeService.IsOpenCode(target)?"OpenCode · ":"Command Code · ")+target.Name+" · "+Core.CredentialLabel(target.CredentialState),async()=>{await SwitchAccount(target);tray.BalloonTipTitle="多账号工作台 · 账号已启用";tray.BalloonTipText=target.Name+"，新开的 "+(OpenCodeService.IsOpenCode(target)?"OpenCode":"Command Code")+" 会话生效";tray.ShowBalloonTip(3000);},target.Id!=activeId&&!openCodeActive.Contains(target.Id)&&target.CredentialState!="invalid"&&target.Data!=null&&!transferBusy&&switching.Count==0&&(OpenCodeService.IsOpenCode(target)||string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY"))));
+            Account target=account; ToolStripMenuItem item=TrayAction((OpenCodeService.IsOpenCode(target)?"OpenCode · ":"Command Code · ")+target.Name+" · "+Core.CredentialLabel(target.CredentialState),async()=>{await SwitchAccount(target);tray.BalloonTipIcon=ToolTipIcon.Info;tray.BalloonTipTitle="多账号工作台 · 账号已启用";tray.BalloonTipText=target.Name+"，新开的 "+(OpenCodeService.IsOpenCode(target)?"OpenCode":"Command Code")+" 会话生效";tray.ShowBalloonTip(3000);},target.Id!=activeId&&!openCodeActive.Contains(target.Id)&&target.CredentialState!="invalid"&&target.Data!=null&&!transferBusy&&switching.Count==0&&(OpenCodeService.IsOpenCode(target)||string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY"))));
             item.Checked=target.Id==activeId||openCodeActive.Contains(target.Id);accounts.DropDownItems.Add(item);
         }
         accounts.Enabled=store.Accounts.Count>0;menu.Items.Add(accounts);
+        menu.Items.Add(TrayItem(store.Settings.MiniWindow?"隐藏悬浮窗":"显示悬浮窗",()=>{ToggleMini();return Task.FromResult(0);}));
+        menu.Items.Add(TrayItem("打开主界面",async()=>await ShowWindow()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(TrayAction("彻底退出",()=>{quitting=true;Close();return Task.FromResult(0);}));
+        menu.Items.Add(TrayItem("彻底退出",()=>{quitting=true;Close();return Task.FromResult(0);}));
+    }
+    private sealed class Overview {
+        public double Balance;
+        public double Forecast;
+        public int ForecastCount;
+        public int Accounts;
+        public int Attention;
+        public string SoonestName;
+        public DateTimeOffset? SoonestAt;
+    }
+    private Overview ReadOverview() {
+        Overview overview=new Overview();
+        foreach(Account account in store.Accounts) {
+            overview.Accounts++;
+            AccountData data=account.Data;
+            bool broken=!string.IsNullOrEmpty(account.Error)||data==null||!string.IsNullOrEmpty(data.Error);
+            if(Core.Alerts(account,store.Settings,DateTimeOffset.UtcNow).Count>0||broken)overview.Attention++;
+            if(broken)continue;
+            if(data.Remaining.HasValue&&data.Remaining.Value>0)overview.Balance+=data.Remaining.Value;
+            double tokens=ForecastFor(data);
+            if(tokens>0){overview.Forecast+=tokens;overview.ForecastCount++;}
+            DateTimeOffset expiry;
+            string value=string.IsNullOrEmpty(data.PeriodEnd)?account.RenewalAt:data.PeriodEnd;
+            if(Core.TryTime(value,out expiry)&&expiry>DateTimeOffset.UtcNow&&(!overview.SoonestAt.HasValue||expiry<overview.SoonestAt.Value)){overview.SoonestAt=expiry;overview.SoonestName=account.Name;}
+        }
+        return overview;
+    }
+    private static double ForecastFor(AccountData data) {
+        if(data==null||!data.Remaining.HasValue||data.Remaining.Value<=0||!data.PeriodCost.HasValue||data.PeriodCost.Value<=0)return 0;
+        double tokens=data.PeriodTokens.HasValue&&data.PeriodTokens.Value>0?data.PeriodTokens.Value:(data.TotalTokens.HasValue?data.TotalTokens.Value:0);
+        return tokens<=0?0:data.Remaining.Value*tokens/data.PeriodCost.Value;
+    }
+    private string ExpiryText(Overview overview) {
+        if(!overview.SoonestAt.HasValue)return "最快到期 暂无订阅周期";
+        DateTimeOffset date=overview.SoonestAt.Value.ToOffset(TimeSpan.FromHours(8));
+        int days=(int)Math.Ceiling((date-DateTimeOffset.UtcNow).TotalDays);
+        return "最快到期 "+overview.SoonestName+" · "+date.ToString("MM-dd")+"（"+(days<=0?"今天":days+" 天")+"）";
+    }
+    private static string FormatTokenCount(double value) {
+        if(value>=1e8)return (value/1e8).ToString("0.##")+"亿";
+        if(value>=1e4)return (value/1e4).ToString("0.#")+"万";
+        return value.ToString("0");
+    }
+    private sealed class AccountForecast { public double? Days; public double?[] Trend = new double?[0]; }
+    private AccountForecast Forecast(Account account, DateTimeOffset now) {
+        AccountForecast forecast = new AccountForecast();
+        AccountData data = account.Data;
+        if (data == null) return forecast;
+        TokenPeriod[] rows = null;
+        if (!OpenCodeService.IsOpenCode(account)) { try { rows = historyCache.Read(account.Id, "day", 0, now).Rows; } catch { } }
+        if (rows != null && rows.Length > 0) forecast.Trend = rows.Reverse().Select(row => row.Tokens).ToArray();
+        if (!data.Remaining.HasValue || data.Remaining.Value <= 0 || !string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return forecast;
+        double daily = 0;
+        if (rows != null) {
+            TokenPeriod[] valid = rows.Where(row => row.Tokens.HasValue && row.Tokens.Value > 0 && row.Cost.HasValue).ToArray();
+            DateTimeOffset todayStart = new DateTimeOffset(now.ToOffset(TimeSpan.FromHours(8)).Date, TimeSpan.FromHours(8));
+            TokenPeriod[] completed = valid.Where(row => { DateTimeOffset start; return Core.TryTime(row.Start, out start) && start < todayStart; }).ToArray();
+            TokenPeriod[] sample = completed.Length > 0 ? completed : valid;
+            if (sample.Length > 0) daily = sample.Sum(row => row.Cost.Value) / sample.Length;
+        }
+        if (daily <= 0 && data.PeriodCost.HasValue && data.PeriodCost.Value > 0) {
+            DateTimeOffset start;
+            if (!string.IsNullOrEmpty(data.PeriodStart) && Core.TryTime(data.PeriodStart, out start)) daily = data.PeriodCost.Value / Math.Max(1, (now - start).TotalDays);
+        }
+        if (daily > 0) forecast.Days = data.Remaining.Value / daily;
+        return forecast;
+    }
+    private void ShowMini() {
+        if(mini==null||mini.IsDisposed) {
+            mini=new MiniWindow();
+            mini.OpenMain=()=>{if(!IsDisposed)BeginInvoke(new Action(async()=>await ShowWindow()));};
+            mini.Moved=location=>{if(verifying||liveVerify)return;store.Settings.MiniX=location.X;store.Settings.MiniY=location.Y;Save();};
+            mini.LockChanged=locked=>{if(verifying||liveVerify)return;store.Settings.MiniLocked=locked;Save();};
+            mini.CloseRequested=()=>{store.Settings.MiniWindow=false;Save();if(mini!=null)mini.Hide();Push();BuildTrayMenu(tray.ContextMenuStrip);};
+            mini.Locked=store.Settings.MiniLocked;
+            Rectangle area=Screen.FromControl(this).WorkingArea;
+            int x=store.Settings.MiniX!=0?store.Settings.MiniX:area.Right-mini.Width-36;
+            int y=store.Settings.MiniY!=0?store.Settings.MiniY:area.Top+72;
+            mini.Location=new Point(Math.Max(area.Left,Math.Min(x,area.Right-mini.Width)),Math.Max(area.Top,Math.Min(y,area.Bottom-mini.Height)));
+        }
+        store.Settings.MiniWindow=true;
+        mini.Show();
+        UpdateMini();
+        if(!verifying&&!liveVerify){Save();BuildTrayMenu(tray.ContextMenuStrip);}
+    }
+    private void HideMini() { if(mini!=null&&!mini.IsDisposed)mini.Hide(); }
+    private void ToggleMini() {
+        if(store.Settings.MiniWindow){store.Settings.MiniWindow=false;HideMini();if(!verifying&&!liveVerify)Save();Push();BuildTrayMenu(tray.ContextMenuStrip);}
+        else ShowMini();
+    }
+    private void UpdateMini() {
+        if(mini==null||mini.IsDisposed||!mini.Visible)return;
+        Overview overview=ReadOverview();
+        string detail=overview.Accounts+" 个账号"+(overview.Attention>0?" · "+overview.Attention+" 待关注":"")+(overview.SoonestAt.HasValue?" · "+overview.SoonestAt.Value.ToOffset(TimeSpan.FromHours(8)).ToString("MM-dd")+" 到期":"");
+        mini.UpdateData(Core.Money(overview.Balance),overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast),detail);
+        tray.Text="多账号工作台 · "+Core.Money(overview.Balance)+" · "+(overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast))+" Token";
+    }
+    private ProxyRecord[] ReadProxyRecords(int take=40) { return ProxyRequestLog.Load(proxyLog,take); }
+    private void AppendProxyRecord(ProxyRecord record) {
+        if(verifying||liveVerify||string.IsNullOrEmpty(proxyLog))return;
+        Task.Run(()=>{try{ProxyRequestLog.Append(proxyLog,record);}catch{}});
+    }
+    private string ExportProxyRecords() {
+        ProxyRecord[] rows=ReadProxyRecords(500);
+        using(SaveFileDialog dialog=new SaveFileDialog {Title="导出代理请求记录",Filter="CSV 文件 (*.csv)|*.csv",DefaultExt="csv",AddExtension=true,FileName="代理请求记录-"+DateTime.Now.ToString("yyyyMMdd")+".csv",RestoreDirectory=true}) {
+            if(dialog.ShowDialog(this)!=DialogResult.OK)return "已取消导出";
+            if(Path.GetExtension(dialog.FileName).ToLowerInvariant()!=".csv")throw new InvalidOperationException("请保存为 CSV 文件");
+            Core.AtomicWrite(dialog.FileName,ProxyRequestLog.Csv(rows));return "代理请求记录已导出，共 "+rows.Length+" 条";
+        }
     }
     private static string TrayWindowQuota(WindowUsage window,AccountData data) {
         if(data!=null&&data.Limited==false)return "不限窗口";
@@ -228,7 +353,7 @@ public class DesktopForm : Form {
     private void ChangeProxyKeys(string operation,Dictionary<string,object> payload){var old=store.Proxy;var next=new JavaScriptSerializer().Deserialize<ProxySettings>(new JavaScriptSerializer().Serialize(old));ProxyWorkspace.Normalize(next);if(operation=="proxyKeyCreate")ProxyWorkspace.Create(next,Core.Text(payload,"name"));else{var key=ProxyWorkspace.Find(next,Core.Text(payload,"keyId"));if(operation=="proxyKeyDelete")next.AccessKeys.Remove(key);else key.Enabled=Core.Boolean(payload,"enabled")==true;}next.Secret=next.AccessKeys.Where(k=>k.Enabled).Select(k=>k.Secret).FirstOrDefault();store.Proxy=next;try{Save();}catch{store.Proxy=old;throw;}localProxy.SetAccessKeys(ProxyWorkspace.EnabledKeys(next));}
 
     private object State() {
-        lock (gate) return new { accounts = store.Accounts.Select(a => new { id = a.Id, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, DateTimeOffset.UtcNow).Select(value => value.Text).ToArray() }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) };
+        lock (gate) { DateTimeOffset now=DateTimeOffset.UtcNow; Dictionary<string,AccountForecast> forecasts=store.Accounts.ToDictionary(a=>a.Id,a=>Forecast(a,now)); return new { accounts = store.Accounts.Select(a => new { id = a.Id, group = a.Group, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, now).Select(value => value.Text).ToArray(), balanceDays = forecasts[a.Id].Days, trend = forecasts[a.Id].Trend }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) }; }
     }
     private void Send(object message) {
         if(!ready)return;
@@ -238,7 +363,7 @@ public class DesktopForm : Form {
         if(target.InvokeRequired){try{target.BeginInvoke(post);}catch(InvalidOperationException){}return;}
         post();
     }
-    private void Push() { Send(new { kind = "state", state = State() }); }
+    private void Push() { Send(new { kind = "state", state = State() }); UpdateMini(); }
     private void Save() { if (verifying || liveVerify) return; lock (gate) Core.AtomicWrite(file, new JavaScriptSerializer {MaxJsonLength=8388608}.Serialize(store)); }
     private void SyncOfficial() {
         if (verifying || liveVerify) return;
@@ -328,7 +453,7 @@ public class DesktopForm : Form {
     }
     private void Notify(Account account) {
         List<Alert> alerts = Core.Alerts(account, store.Settings, DateTimeOffset.UtcNow); List<Alert> fresh = alerts.Where(value => account.AlertIds == null || !account.AlertIds.Contains(value.Id)).ToList(); account.AlertIds = alerts.Select(value => value.Id).ToList();
-        if (fresh.Count > 0 && store.Settings.Notifications && !verifying && !liveVerify) { tray.BalloonTipTitle = "多账号工作台 · " + account.Name; tray.BalloonTipText = string.Join("；", fresh.Select(value => value.Text)); tray.ShowBalloonTip(5000); }
+        if (fresh.Count > 0 && store.Settings.Notifications && !verifying && !liveVerify) { tray.BalloonTipIcon=fresh.Any(value=>value.Text.Contains("额度")||value.Text.Contains("余额"))?ToolTipIcon.Warning:ToolTipIcon.Info; tray.BalloonTipTitle = "多账号工作台 · " + account.Name; tray.BalloonTipText = string.Join("；", fresh.Select(value => value.Text)); tray.ShowBalloonTip(5000); }
     }
     private Account Find(string id) { Account result = store.Accounts.FirstOrDefault(a => a.Id == id); if (result == null) throw new InvalidOperationException("账号不存在"); return result; }
     private static string TransferKey(string platform,string provider,string value){return platform=="opencode"?"opencode|"+provider+"|"+OpenCodeService.Fingerprint(value):"commandcode|"+value;}
@@ -415,7 +540,7 @@ public class DesktopForm : Form {
         Dictionary<string, object> request; try { request = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(e.WebMessageAsJson); } catch { return; }
         string id = Core.Text(request, "id"), op = Core.Text(request, "op"); Dictionary<string, object> payload = Core.Object(Core.Value(request, "payload")); string message = "";
         try {
-            if ((verifying || liveVerify) && op != "ready" && op != "state" && op != "maximize" && op != "minimize" && op != "history" && !(verifying&&(op=="pageSize"||op=="restoreDefaultSize"||op=="keepWindowSize"||op=="renewal"||op=="officialUsage"||op=="proxyConfigure"||op=="proxyKey"||op=="proxyStop"||op=="proxyKeyCreate"||op=="proxyKeyToggle"||op=="proxyKeyDelete"||op=="proxyAutoJoin"))) throw new InvalidOperationException("检查模式不修改真实账号");
+            if ((verifying || liveVerify) && op != "ready" && op != "state" && op != "maximize" && op != "minimize" && op != "history" && !(verifying&&(op=="pageSize"||op=="restoreDefaultSize"||op=="keepWindowSize"||op=="renewal"||op=="officialUsage"||op=="proxyConfigure"||op=="proxyKey"||op=="proxyStop"||op=="proxyKeyCreate"||op=="proxyKeyToggle"||op=="proxyKeyDelete"||op=="proxyAutoJoin"||op=="group"))) throw new InvalidOperationException("检查模式不修改真实账号");
             switch (op) {
                 case "minimize": WindowState = FormWindowState.Minimized; break;
                 case "maximize": MaximizedBounds = Screen.FromControl(this).WorkingArea; WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; break;
@@ -469,10 +594,13 @@ public class DesktopForm : Form {
                 case "remove": if (busy||transferBusy||refreshingAccounts.Count>0||localProxy.InFlight>0) throw new InvalidOperationException("刷新进行中，请稍后移除"); string removeId = Core.Text(payload, "id"); Find(removeId); lock (gate) { store.Accounts.RemoveAll(value => value.Id == removeId); keys.Remove(removeId); } if(store.Proxy.AccountIds.Remove(removeId)){store.Proxy.Enabled=store.Proxy.Enabled&&store.Proxy.AccountIds.Count>0;localProxy.SetPool(store.Proxy.AccountIds);if(!store.Proxy.Enabled)localProxy.Stop();} try { historyCache.Remove(removeId); } catch { } Save(); SyncOfficial(); Schedule(); Push(); break;
                 case "renewal": Account renewal=Find(Core.Text(payload,"id"));string renewalValue=Core.Text(payload,"value").Trim();DateTimeOffset renewalTime=DateTimeOffset.MinValue;if(renewalValue!=""&&(!DateTimeOffset.TryParse(renewalValue,System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out renewalTime)||renewalTime.Year<2020||renewalTime.Year>2100))throw new InvalidOperationException("请输入有效的续费日期");string previousRenewal=renewal.RenewalAt;renewal.RenewalAt=renewalValue==""?"":renewalTime.ToString("o");try{Save();}catch{renewal.RenewalAt=previousRenewal;throw;}Notify(renewal);Save();Push();message=renewalValue==""?"已清除手动续费日期":"续费日期已保存，将提前 7 / 3 / 1 天提醒";break;
                 case "rename": Account rename = Find(Core.Text(payload, "id")); string name = Core.Text(payload, "name").Trim(); if (name == "") throw new InvalidOperationException("请填写账号备注"); rename.Name = name.Substring(0, Math.Min(name.Length, 80)); Save(); Push(); break;
+                case "group": Account grouped=Find(Core.Text(payload,"id"));string groupValue=Core.Text(payload,"group").Trim();if(groupValue.Length>24)throw new InvalidOperationException("分组名称最多 24 个字符");grouped.Group=groupValue==""?null:groupValue;Save();Push();message=groupValue==""?"已清除账号分组":"已归入分组 "+groupValue;break;
+                case "exportProxyRecords": message=ExportProxyRecords();break;
+                case "miniWindow": store.Settings.MiniWindow=Core.Boolean(payload,"enabled")==true;if(store.Settings.MiniWindow)ShowMini();else{HideMini();if(!verifying&&!liveVerify)Save();Push();BuildTrayMenu(tray.ContextMenuStrip);}message=store.Settings.MiniWindow?"悬浮窗已显示":"悬浮窗已隐藏";break;
                 case "settings":
                     int interval = (int)(Core.Number(payload, "interval") ?? 0), warning = (int)(Core.Number(payload, "warning") ?? 0), critical = (int)(Core.Number(payload, "critical") ?? 0); double low = Core.Number(payload, "lowBalance") ?? -1;
                     if (interval < 60 || interval > 3600 || warning < 1 || warning >= critical || critical > 100 || low < 0) throw new InvalidOperationException("刷新需为 60–3600 秒，预警阈值需小于严重预警");
-                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
+                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight,MiniWindow=store.Settings.MiniWindow,MiniLocked=store.Settings.MiniLocked,MiniX=store.Settings.MiniX,MiniY=store.Settings.MiniY, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
                     Save(); Schedule(); Push(); break;
                 case "history":
                     Account historyAccount=Find(Core.Text(payload,"accountId"));HistoryQuery historyQuery=Query(payload);string grain=historyQuery.Grain;int page=historyQuery.Page;DateTimeOffset historyNow=DateTimeOffset.UtcNow;int pages;DateTimeOffset[] boundaries=TokenHistoryCache.Dates(historyQuery,historyNow,out pages);
@@ -492,7 +620,7 @@ public class DesktopForm : Form {
         catch (Exception error) { Send(new { kind = "reply", id = id, ok = false, error = error.Message, state = State() }); }
     }
     private void Seed() {
-        for (int i = 0; i < 14; i++) store.Accounts.Add(new Account { Id = "demo-" + i, Name = new string[] { "主力研发账号", "备用编码账号", "团队协作账号" }[i % 3] + (i > 2 ? " " + (i + 1) : ""), Secret = Core.Encrypt("fixture-" + i), Method = "api", CredentialState="valid", CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o"), Data = new AccountData { UserId = "demo", Email = "demo" + i + "@example.com", Plan = "individual-goat", Status = "active", Remaining = 56.56 - i, Monthly = 56.56 - i, Purchased = 0, Free = 0, MonthlyUsed = 13.44 + i, MonthlyTotal = 70, TotalTokens = 90575648, InputTokens = 90300000, OutputTokens = 275648, PeriodTokens = 85258665, PeriodStart = "2026-10-13T06:35:41Z", PeriodEnd = "2026-11-13T06:35:41Z", FetchedAt = DateTimeOffset.UtcNow.ToString("o"), Limited = true, FiveHour = new WindowUsage { Used = 3.44, Cap = 14, ResetAt = DateTimeOffset.UtcNow.AddHours(2).ToString("o") }, Weekly = new WindowUsage { Used = 13.44, Cap = 35, ResetAt = i == 2 ? "0" : DateTimeOffset.UtcNow.AddDays(4).ToString("o") } } });
+        for (int i = 0; i < 14; i++) store.Accounts.Add(new Account { Id = "demo-" + i, Name = new string[] { "主力研发账号", "备用编码账号", "团队协作账号" }[i % 3] + (i > 2 ? " " + (i + 1) : ""), Secret = Core.Encrypt("fixture-" + i), Method = "api", CredentialState="valid", CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o"), Data = new AccountData { UserId = "demo", Email = "demo" + i + "@example.com", Plan = "individual-goat", Status = "active", Remaining = 56.56 - i, Monthly = 56.56 - i, Purchased = 0, Free = 0, MonthlyUsed = 13.44 + i, MonthlyTotal = 70, TotalTokens = 90575648, InputTokens = 90300000, OutputTokens = 275648, PeriodTokens = 85258665, PeriodCost = 12.5, PeriodStart = "2026-10-13T06:35:41Z", PeriodEnd = "2026-11-13T06:35:41Z", FetchedAt = DateTimeOffset.UtcNow.ToString("o"), Limited = true, FiveHour = new WindowUsage { Used = 3.44, Cap = 14, ResetAt = DateTimeOffset.UtcNow.AddHours(2).ToString("o") }, Weekly = new WindowUsage { Used = 13.44, Cap = 35, ResetAt = i == 2 ? "0" : DateTimeOffset.UtcNow.AddDays(4).ToString("o") } } });
         activeId = "demo-0";
     }
     private async Task Verify() {
@@ -504,7 +632,7 @@ public class DesktopForm : Form {
             await view.CoreWebView2.ExecuteScriptAsync("window.__startHistoryLatencyProbe && window.__startHistoryLatencyProbe()"); await Task.Delay(500);
             report["historyCacheLatency"]=new JavaScriptSerializer().DeserializeObject(await view.CoreWebView2.ExecuteScriptAsync("window.__historyLatencyResult || null")); check=new JavaScriptSerializer().Serialize(report);
             if (verifying) {
-                Account tokenErrorDemo=store.Accounts[0];string tokenTotalBeforeError=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.stat-grid article:nth-child(3) strong').textContent");tokenErrorDemo.Error="模拟凭据检测失败";Push();await Task.Delay(100);bool historicalTokensRetained=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.stat-grid article:nth-child(3) strong').textContent") == tokenTotalBeforeError;tokenErrorDemo.Error=null;Push();await Task.Delay(80);report["historicalTokensRetainedOnAccountError"]=historicalTokensRetained;if(!historicalTokensRetained)throw new InvalidOperationException("凭据检测异常时累计 Token 不应丢失");
+                Account tokenErrorDemo=store.Accounts[0];string tokenTotalBeforeError=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.stat-grid article:nth-child(4) strong').textContent");tokenErrorDemo.Error="模拟凭据检测失败";Push();await Task.Delay(100);bool historicalTokensRetained=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.stat-grid article:nth-child(4) strong').textContent") == tokenTotalBeforeError;tokenErrorDemo.Error=null;Push();await Task.Delay(80);report["historicalTokensRetainedOnAccountError"]=historicalTokensRetained;if(!historicalTokensRetained)throw new InvalidOperationException("凭据检测异常时累计 Token 不应丢失");
                 var near=store.Accounts[1];double? beforeUsed=near.Data.MonthlyUsed,beforeBalance=near.Data.Remaining;near.Data.MonthlyUsed=69.93;near.Data.Remaining=0.07;Push();await Task.Delay(100);bool mainQuotaLabel=await view.CoreWebView2.ExecuteScriptAsync("Array.from(document.querySelectorAll('.account-row')).some(row=>row.querySelector('.identity .name b').textContent==='备用编码账号'&&row.querySelector('.plan-cell').textContent.includes('余量不足'))") == "true";
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.proxy-open-button').click()");await Task.Delay(100);
                 bool proxyDialog=await view.CoreWebView2.ExecuteScriptAsync("!!document.querySelector('.proxy-modal')&&document.querySelector('[aria-label=\"本地代理地址\"]').value==='http://127.0.0.1:17766/v1'&&document.querySelectorAll('.proxy-account-list tbody tr').length===4&&document.querySelector('.proxy-account-list thead').textContent.includes('每月可用')&&!document.querySelector('[aria-label=\"代理访问范围\"]')&&!!document.querySelector('[aria-label=\"自动加入账号池\"]')&&!document.querySelector('.proxy-connect').textContent.includes('不影响 VPN')&&Array.from(document.querySelectorAll('.proxy-account-list tbody tr')).every(row=>row.querySelector('.ant-checkbox').getBoundingClientRect().width<20&&row.querySelector('b').getBoundingClientRect().width>70)&&document.querySelector('.proxy-modal').getBoundingClientRect().bottom<=innerHeight-5&&document.querySelector('.proxy-modal').scrollHeight<=document.querySelector('.proxy-modal').clientHeight+1&&document.querySelector('.proxy-modal').scrollWidth<=document.querySelector('.proxy-modal').clientWidth+1") == "true";
@@ -546,7 +674,8 @@ public class DesktopForm : Form {
                 BuildTrayMenu(tray.ContextMenuStrip);
                 ToolStripMenuItem quickSwitch=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(item=>item.Text=="快速切换账号");
                 bool accountMenu=quickSwitch.DropDownItems.Count==store.Accounts.Count;
-                report["trayMenu"]=new{accountMenu=accountMenu,quotaShown=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Count(item=>item.Text.Contains("已用：")||item.Text.StartsWith("剩余额度："))==4,simpleMenu=!tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text.Contains("自动刷新")||item.Text=="打开账号总览"||item.Text=="隐藏到托盘"||item.Text=="桌面预警提醒")};
+                report["trayMenu"]=new{accountMenu=accountMenu,quotaShown=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Count(item=>item.Text.StartsWith("余额 ")||item.Text.StartsWith("5 小时 ")||item.Text.StartsWith("月度 ")||item.Text.StartsWith("最快到期 "))==4,simpleMenu=!tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text.Contains("自动刷新")||item.Text=="打开账号总览"||item.Text=="隐藏到托盘"||item.Text=="桌面预警提醒"),miniToggle=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text=="显示悬浮窗"||item.Text=="隐藏悬浮窗")};
+                ContextMenuStrip trayStrip=tray.ContextMenuStrip;trayStrip.PerformLayout();Size traySize=trayStrip.GetPreferredSize(Size.Empty);trayStrip.Size=traySize;string trayDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(trayDirectory);using(Bitmap shot=new Bitmap(Math.Max(1,traySize.Width),Math.Max(1,traySize.Height))){trayStrip.DrawToBitmap(shot,new Rectangle(Point.Empty,traySize));shot.Save(Path.Combine(trayDirectory,"tray-menu-preview.png"),System.Drawing.Imaging.ImageFormat.Png);}
                 bool topPopups = true;
                 foreach (string selector in new string[] { ".header-actions .primary", ".header-actions .settings-button", ".identity" }) {
                     await view.CoreWebView2.ExecuteScriptAsync("document.querySelector(" + new JavaScriptSerializer().Serialize(selector) + ").click()"); await Task.Delay(80);
@@ -578,7 +707,7 @@ public class DesktopForm : Form {
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.proxy-open-button').click()");await Task.Delay(100);report["openCodeProxyUI"]=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.proxy-account-list').textContent.includes('OpenCode Go 测试账号')&&!document.querySelector('.proxy-account-list tbody input').disabled") == "true";await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.modal-title .icon-button').click()");await Task.Delay(50);bool noOpenCodePanel=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('[data-platform=\"opencode\"] input[type=checkbox]')") == "true";
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.platform-tabs button')[2].click()");await Task.Delay(100);bool onlyOpenCode=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row').length===1&&document.querySelector('.account-row').dataset.platform==='opencode'&&document.querySelector('.stat-grid strong').textContent.includes('1')") == "true";
                 bool openCodeAtTop=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.account-row').getBoundingClientRect().top-document.querySelector('.table-head').getBoundingClientRect().bottom<3") == "true";
-                bool remainingQuota=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.account-row .usage strong').textContent==='80%'&&document.querySelector('.account-row .usage-top span').textContent==='已用 · 可用 20%'") == "true";
+                bool remainingQuota=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const m=document.querySelectorAll('.account-row .usage')[0];return m.querySelector('strong').textContent==='80%'&&m.querySelector('.usage-top span').textContent==='已用 · 可用 20%'})()") == "true";
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.account-row').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-20,clientY:innerHeight-20}))");await Task.Delay(200);
                 bool contextMenu=await view.CoreWebView2.ExecuteScriptAsync("!!document.querySelector('.account-context-menu')&&document.querySelector('.account-context-menu').textContent.includes('在 OpenCode 中使用')&&!document.querySelector('.account-context-menu').textContent.includes('客户端用量面板')&&Array.from(document.querySelectorAll('.account-context-menu .ant-dropdown-menu-item')).length>=9&&document.querySelector('.account-context-menu').getBoundingClientRect().right<=innerWidth+1&&document.querySelector('.account-context-menu').getBoundingClientRect().bottom<=innerHeight+1") == "true";
                 using(FileStream menuPreview=File.Create(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification","context-menu-preview.png")))await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,menuPreview);
@@ -616,7 +745,23 @@ public class DesktopForm : Form {
                 bool independentDialogs=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.modal')&&!document.querySelector('.launch-button')&&!document.querySelector('.account-modal-tabs')") == "true";
                 report["separateAccountActions"]=new{panelRestartPrompt=panelRestartPrompt,independentDialogs=independentDialogs};if(!panelRestartPrompt||!independentDialogs)throw new InvalidOperationException("独立弹窗及客户端重启提示验证失败：prompt="+panelRestartPrompt+",dialogs="+independentDialogs);
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.platform-tabs button')[0].click()");await Task.Delay(80);
-                report["workspaceUI"]=new{openCodeAtTop=openCodeAtTop,remainingQuota=remainingQuota,cardLayout=cardLayout,multiCardLayout=multiCardLayout,renewalCalendar=renewalCalendar,rangeCalendar=rangeCalendar,platformLogos=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.identity .platform-logo').length===document.querySelectorAll('.account-row').length") == "true",monitorRemoved=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.monitor')") == "true",threeSummaryCards=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.stat-grid article').length===3") == "true",onlyOpenCode=onlyOpenCode,onlyCommandCode=onlyCommandCode,renewalEditor=renewalEditor,renewalSaved=renewalSaved,insideKeeps=insideKeeps,outsideCloses=outsideCloses};
+                report["usageColumns"]=new{order=await view.CoreWebView2.ExecuteScriptAsync("Array.from(document.querySelectorAll('.table-head>span')).slice(2,5).map(s=>s.textContent.replace(/\\s+/g,'')).join('|')") == new JavaScriptSerializer().Serialize("月度用量计费周期|每周用量|5小时用量"),forecast=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const card=document.querySelector('.stat-grid article:nth-child(3)');return card.querySelector('.stat-label').textContent.includes('预计可用 Token')&&card.querySelector('strong').textContent!=='—'})()") == "true"};
+                bool forecastCell=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');return !!cell&&/天/.test(cell.querySelector('b').textContent)&&!!cell.querySelector('svg.spark')})()") == "true";
+                bool tableNoOverflow=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.table-shell').scrollWidth<=document.querySelector('.table-shell').clientWidth+1") == "true";
+                string forecastProbe=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');const shell=document.querySelector('.table-shell');return JSON.stringify({cell:!!cell,text:cell?cell.querySelector('b').textContent:null,spark:cell?!!cell.querySelector('svg.spark'):false,cards:!!document.querySelector('.card-grid'),scroll:shell.scrollWidth,client:shell.clientWidth})})()");
+                report["forecastCell"]=new{shown=forecastCell,noHorizontalOverflow=tableNoOverflow,probe=forecastProbe};if(!forecastCell||!tableNoOverflow)throw new InvalidOperationException("预计可用列显示异常："+forecastProbe);
+                await view.CoreWebView2.ExecuteScriptAsync("window.chrome.webview.postMessage({id:'fixture-group',op:'group',payload:{id:'demo-1',group:'研发'}})");await Task.Delay(220);
+                bool groupSaved=store.Accounts.Any(item=>item.Id=="demo-1"&&item.Group=="研发");
+                bool groupShown=await view.CoreWebView2.ExecuteScriptAsync("Array.from(document.querySelectorAll('.account-row .group-tag')).some(node=>node.textContent==='研发')&&Array.from(document.querySelectorAll('.group-filter option')).some(node=>node.textContent==='研发')") == "true";
+                await view.CoreWebView2.ExecuteScriptAsync("window.chrome.webview.postMessage({id:'fixture-group-clear',op:'group',payload:{id:'demo-1',group:''}})");await Task.Delay(220);
+                bool groupCleared=store.Accounts.Any(item=>item.Id=="demo-1"&&string.IsNullOrEmpty(item.Group))&&await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.account-row .group-tag').length===0") == "true";
+                ShowMini();await Task.Delay(160);
+                bool miniVisible=mini!=null&&mini.Visible&&!string.IsNullOrEmpty(mini.Snapshot);
+                report["groupUI"]=new{saved=groupSaved,shown=groupShown,cleared=groupCleared};
+                report["miniWindow"]=new{visible=miniVisible,blurred=mini!=null&&mini.Blurred,snapshot=mini==null?"":mini.Snapshot};
+                if(miniVisible){string miniDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(miniDirectory);using(Bitmap shot=new Bitmap(mini.Width,mini.Height)){using(Graphics graphics=Graphics.FromImage(shot))graphics.CopyFromScreen(mini.Location,Point.Empty,mini.Size);shot.Save(Path.Combine(miniDirectory,"mini-preview.png"),System.Drawing.Imaging.ImageFormat.Png);}mini.Hide();}
+                if(!groupSaved||!groupShown||!groupCleared||!miniVisible)throw new InvalidOperationException("分组或悬浮窗验证失败");
+                report["workspaceUI"]=new{openCodeAtTop=openCodeAtTop,remainingQuota=remainingQuota,cardLayout=cardLayout,multiCardLayout=multiCardLayout,renewalCalendar=renewalCalendar,rangeCalendar=rangeCalendar,platformLogos=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.identity .platform-logo').length===document.querySelectorAll('.account-row').length") == "true",monitorRemoved=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.monitor')") == "true",fourSummaryCards=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.stat-grid article').length===4") == "true",onlyOpenCode=onlyOpenCode,onlyCommandCode=onlyCommandCode,renewalEditor=renewalEditor,renewalSaved=renewalSaved,insideKeeps=insideKeeps,outsideCloses=outsideCloses};
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[data-platform=\"opencode\"] .identity').click()");await Task.Delay(100);
                 string previewDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");using(FileStream openCodePreview=File.Create(Path.Combine(previewDirectory,"opencode-preview.png")))await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,openCodePreview);
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.model-view-button').click()");await Task.Delay(100);bool modelStats=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.model-usage tbody tr').length===1&&!document.querySelector('.history-range')") == "true";

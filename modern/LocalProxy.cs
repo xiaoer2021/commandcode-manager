@@ -59,6 +59,8 @@ public sealed class LocalProxy : IDisposable {
     public bool RequireLan,RequireVerifiedAccounts;
     public Func<string,Dictionary<string,string>,Task<LocalProxyApiResponse>> WorkspaceApi;
     public Action Changed=delegate{};
+    public Action<ProxyRecord> Recorded=delegate{};
+    public void LoadRecords(IEnumerable<ProxyRecord> history){lock(gate){records.Clear();if(history!=null)foreach(var record in history.Where(r=>r!=null).Reverse().Take(40).Reverse())records.Add(record);}Changed();}
     private static JavaScriptSerializer Json(){return new JavaScriptSerializer{MaxJsonLength=8388608,RecursionLimit=100};}
     public LocalProxy(Func<ProxyAccount[]> accounts,HttpMessageHandler handler=null){snapshot=accounts;upstream=handler==null?new HttpClient(new HttpClientHandler{AllowAutoRedirect=false,AutomaticDecompression=DecompressionMethods.GZip|DecompressionMethods.Deflate}):new HttpClient(handler);upstream.Timeout=TimeSpan.FromMinutes(5);upstream.DefaultRequestHeaders.UserAgent.ParseAdd("MultiAccountWorkspace-LocalProxy/1.0");}
     public static string GenerateKey(){byte[] bytes=new byte[32];using(var rng=RandomNumberGenerator.Create())rng.GetBytes(bytes);return "mw_"+Convert.ToBase64String(bytes).TrimEnd('=').Replace('+','-').Replace('/','_');}
@@ -115,7 +117,7 @@ public sealed class LocalProxy : IDisposable {
     private static bool Supports(Catalog catalog,string model,string path){return SelectEndpoint(catalog,model,path)!=null;}
     private void Cool(string id,DateTimeOffset until,string reason="上游暂时拒绝请求"){lock(gate){cooldown[id]=until;pauseReasons[id]=reason;}}
     private void Reserve(string id,int delta){lock(gate){int count;busy.TryGetValue(id,out count);busy[id]=Math.Max(0,count+delta);}}
-    private void Log(ProxyRecord record){lock(gate){records.Add(record);if(records.Count>40)records.RemoveAt(0);}Changed();}
+    private void Log(ProxyRecord record){lock(gate){records.Add(record);if(records.Count>40)records.RemoveAt(0);}Changed();try{Recorded(record);}catch{}}
     private async Task Forward(Stream output,Request incoming,string path,string model,Action committed,CancellationToken token){
         ProxyAccount[] candidates=Accounts();
         if(candidates.Length==0)throw new ProtocolFailure(503,"没有可用账号，请检查账号池或等待冷却结束");

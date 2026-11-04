@@ -12,3 +12,6 @@ Add-Type -Path (Join-Path $PSScriptRoot 'ProxyNetworkChecks.cs') -ReferencedAsse
 [ProxyNetworkChecks]::Run()
 Add-Type -Path (Join-Path $PSScriptRoot 'ProxyWorkspaceChecks.cs') -ReferencedAssemblies $ccHost,'System.Core.dll','System.Net.Http.dll','System.Web.Extensions.dll','System.Security.dll'
 [ProxyWorkspaceChecks]::Run()
+Add-Type -Path (Join-Path $PSScriptRoot 'ProxyLogChecks.cs') -ReferencedAssemblies $ccHost,'System.Core.dll','System.Web.Extensions.dll'
+$ccLogTemp=Join-Path ([IO.Path]::GetTempPath()) ('cmd-proxy-log-test-'+[guid]::NewGuid().ToString('N'))
+[ProxyLogChecks]::Run($ccLogTemp)
