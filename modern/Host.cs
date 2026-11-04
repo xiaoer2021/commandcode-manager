@@ -225,7 +225,7 @@ public class DesktopForm : Form {
         if(value>=1e4)return (value/1e4).ToString("0.#")+"万";
         return value.ToString("0");
     }
-    private sealed class AccountForecast { public double? Days; public double?[] Trend = new double?[0]; }
+    private sealed class AccountForecast { public double? Days; public double? PeriodDaysLeft; public bool CoversPeriod; public double?[] Trend = new double?[0]; }
     private AccountForecast Forecast(Account account, DateTimeOffset now) {
         AccountForecast forecast = new AccountForecast();
         AccountData data = account.Data;
@@ -233,20 +233,16 @@ public class DesktopForm : Form {
         TokenPeriod[] rows = null;
         if (!OpenCodeService.IsOpenCode(account)) { try { rows = historyCache.Read(account.Id, "day", 0, now).Rows; } catch { } }
         if (rows != null && rows.Length > 0) forecast.Trend = rows.Reverse().Select(row => row.Tokens).ToArray();
-        if (!data.Remaining.HasValue || data.Remaining.Value <= 0 || !string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return forecast;
-        double daily = 0;
-        if (rows != null) {
-            TokenPeriod[] valid = rows.Where(row => row.Tokens.HasValue && row.Tokens.Value > 0 && row.Cost.HasValue).ToArray();
-            DateTimeOffset todayStart = new DateTimeOffset(now.ToOffset(TimeSpan.FromHours(8)).Date, TimeSpan.FromHours(8));
-            TokenPeriod[] completed = valid.Where(row => { DateTimeOffset start; return Core.TryTime(row.Start, out start) && start < todayStart; }).ToArray();
-            TokenPeriod[] sample = completed.Length > 0 ? completed : valid;
-            if (sample.Length > 0) daily = sample.Sum(row => row.Cost.Value) / sample.Length;
-        }
-        if (daily <= 0 && data.PeriodCost.HasValue && data.PeriodCost.Value > 0) {
-            DateTimeOffset start;
-            if (!string.IsNullOrEmpty(data.PeriodStart) && Core.TryTime(data.PeriodStart, out start)) daily = data.PeriodCost.Value / Math.Max(1, (now - start).TotalDays);
-        }
-        if (daily > 0) forecast.Days = data.Remaining.Value / daily;
+        if (!string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return forecast;
+        DateTimeOffset start, end;
+        if (!data.MonthlyUsed.HasValue || !data.MonthlyTotal.HasValue || data.MonthlyTotal.Value <= 0) return forecast;
+        if (string.IsNullOrEmpty(data.PeriodStart) || !Core.TryTime(data.PeriodStart, out start)) return forecast;
+        double elapsed = (now - start).TotalDays;
+        double remainingCredit = Math.Max(0, data.MonthlyTotal.Value - data.MonthlyUsed.Value);
+        if (remainingCredit <= 0) { forecast.Days = 0; }
+        else if (elapsed > 0 && data.MonthlyUsed.Value > 0) forecast.Days = remainingCredit / (data.MonthlyUsed.Value / elapsed);
+        if (!string.IsNullOrEmpty(data.PeriodEnd) && Core.TryTime(data.PeriodEnd, out end) && end > now) forecast.PeriodDaysLeft = (end - now).TotalDays;
+        forecast.CoversPeriod = forecast.Days.HasValue && forecast.PeriodDaysLeft.HasValue && forecast.Days.Value >= forecast.PeriodDaysLeft.Value;
         return forecast;
     }
     private void ShowMini() {
@@ -353,7 +349,7 @@ public class DesktopForm : Form {
     private void ChangeProxyKeys(string operation,Dictionary<string,object> payload){var old=store.Proxy;var next=new JavaScriptSerializer().Deserialize<ProxySettings>(new JavaScriptSerializer().Serialize(old));ProxyWorkspace.Normalize(next);if(operation=="proxyKeyCreate")ProxyWorkspace.Create(next,Core.Text(payload,"name"));else{var key=ProxyWorkspace.Find(next,Core.Text(payload,"keyId"));if(operation=="proxyKeyDelete")next.AccessKeys.Remove(key);else key.Enabled=Core.Boolean(payload,"enabled")==true;}next.Secret=next.AccessKeys.Where(k=>k.Enabled).Select(k=>k.Secret).FirstOrDefault();store.Proxy=next;try{Save();}catch{store.Proxy=old;throw;}localProxy.SetAccessKeys(ProxyWorkspace.EnabledKeys(next));}
 
     private object State() {
-        lock (gate) { DateTimeOffset now=DateTimeOffset.UtcNow; Dictionary<string,AccountForecast> forecasts=store.Accounts.ToDictionary(a=>a.Id,a=>Forecast(a,now)); return new { accounts = store.Accounts.Select(a => new { id = a.Id, group = a.Group, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, now).Select(value => value.Text).ToArray(), balanceDays = forecasts[a.Id].Days, trend = forecasts[a.Id].Trend }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) }; }
+        lock (gate) { DateTimeOffset now=DateTimeOffset.UtcNow; Dictionary<string,AccountForecast> forecasts=store.Accounts.ToDictionary(a=>a.Id,a=>Forecast(a,now)); return new { accounts = store.Accounts.Select(a => new { id = a.Id, group = a.Group, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, now).Select(value => value.Text).ToArray(), balanceDays = forecasts[a.Id].Days, balanceCoversPeriod = forecasts[a.Id].CoversPeriod, trend = forecasts[a.Id].Trend }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) }; }
     }
     private void Send(object message) {
         if(!ready)return;
@@ -621,6 +617,7 @@ public class DesktopForm : Form {
     }
     private void Seed() {
         for (int i = 0; i < 14; i++) store.Accounts.Add(new Account { Id = "demo-" + i, Name = new string[] { "主力研发账号", "备用编码账号", "团队协作账号" }[i % 3] + (i > 2 ? " " + (i + 1) : ""), Secret = Core.Encrypt("fixture-" + i), Method = "api", CredentialState="valid", CredentialCheckedAt=DateTimeOffset.UtcNow.ToString("o"), Data = new AccountData { UserId = "demo", Email = "demo" + i + "@example.com", Plan = "individual-goat", Status = "active", Remaining = 56.56 - i, Monthly = 56.56 - i, Purchased = 0, Free = 0, MonthlyUsed = 13.44 + i, MonthlyTotal = 70, TotalTokens = 90575648, InputTokens = 90300000, OutputTokens = 275648, PeriodTokens = 85258665, PeriodCost = 12.5, PeriodStart = "2026-10-13T06:35:41Z", PeriodEnd = "2026-11-13T06:35:41Z", FetchedAt = DateTimeOffset.UtcNow.ToString("o"), Limited = true, FiveHour = new WindowUsage { Used = 3.44, Cap = 14, ResetAt = DateTimeOffset.UtcNow.AddHours(2).ToString("o") }, Weekly = new WindowUsage { Used = 13.44, Cap = 35, ResetAt = i == 2 ? "0" : DateTimeOffset.UtcNow.AddDays(4).ToString("o") } } });
+        store.Accounts[4].Data.MonthlyUsed = 69.9; store.Accounts[4].Data.Monthly = 0.1; store.Accounts[4].Data.Remaining = 0.1;
         activeId = "demo-0";
     }
     private async Task Verify() {
@@ -746,7 +743,7 @@ public class DesktopForm : Form {
                 report["separateAccountActions"]=new{panelRestartPrompt=panelRestartPrompt,independentDialogs=independentDialogs};if(!panelRestartPrompt||!independentDialogs)throw new InvalidOperationException("独立弹窗及客户端重启提示验证失败：prompt="+panelRestartPrompt+",dialogs="+independentDialogs);
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.platform-tabs button')[0].click()");await Task.Delay(80);
                 report["usageColumns"]=new{order=await view.CoreWebView2.ExecuteScriptAsync("Array.from(document.querySelectorAll('.table-head>span')).slice(2,5).map(s=>s.textContent.replace(/\\s+/g,'')).join('|')") == new JavaScriptSerializer().Serialize("月度用量计费周期|每周用量|5小时用量"),forecast=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const card=document.querySelector('.stat-grid article:nth-child(3)');return card.querySelector('.stat-label').textContent.includes('预计可用 Token')&&card.querySelector('strong').textContent!=='—'})()") == "true"};
-                bool forecastCell=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');return !!cell&&/天/.test(cell.querySelector('b').textContent)&&!!cell.querySelector('svg.spark')})()") == "true";
+                bool forecastCell=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');return !!cell&&/天|本周期够用/.test(cell.querySelector('b').textContent)&&!!cell.querySelector('svg.spark')&&!!cell.querySelector('small.spark-label')})()") == "true";
                 bool tableNoOverflow=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.table-shell').scrollWidth<=document.querySelector('.table-shell').clientWidth+1") == "true";
                 string forecastProbe=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');const shell=document.querySelector('.table-shell');return JSON.stringify({cell:!!cell,text:cell?cell.querySelector('b').textContent:null,spark:cell?!!cell.querySelector('svg.spark'):false,cards:!!document.querySelector('.card-grid'),scroll:shell.scrollWidth,client:shell.clientWidth})})()");
                 report["forecastCell"]=new{shown=forecastCell,noHorizontalOverflow=tableNoOverflow,probe=forecastProbe};if(!forecastCell||!tableNoOverflow)throw new InvalidOperationException("预计可用列显示异常："+forecastProbe);
