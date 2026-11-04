@@ -40,6 +40,7 @@ public class DesktopForm : Form {
     private readonly string deployedDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui");
     private readonly string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "commandcode-account-manager", "accounts-native.json");
     private readonly string proxyLog;
+    private readonly Dictionary<string,double?> rangeCosts=new Dictionary<string,double?>();
     private MiniWindow mini;
     private readonly string authFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".commandcode", "auth.json");
     private readonly Dictionary<string, string> keys = new Dictionary<string, string>();
@@ -160,12 +161,15 @@ public class DesktopForm : Form {
     private void BuildTrayMenu(ContextMenuStrip menu) {
         while(menu.Items.Count>0) { ToolStripItem old=menu.Items[0]; menu.Items.RemoveAt(0); old.Dispose(); }
         Overview overview=ReadOverview();
-        Account current=store.Accounts.FirstOrDefault(a=>a.Id==activeId);
+        Account current=store.Accounts.FirstOrDefault(a=>a.Id==activeId)??store.Accounts.FirstOrDefault();
         ToolStripMenuItem header=new ToolStripMenuItem(current==null?"当前账号 · 未匹配":"当前账号 · "+current.Name){Enabled=false,Padding=new Padding(10,6,14,6)};header.Font=new Font(menu.Font,FontStyle.Bold);menu.Items.Add(header);
         AccountData quota=current==null?null:current.Data;
         menu.Items.Add(TrayInfo("余额 "+(quota==null?"暂无数据":Core.Money(quota.Remaining))+" · 预计 "+(overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast))+" Token"));
-        menu.Items.Add(TrayInfo("5 小时 "+TrayWindowQuota(quota==null?null:quota.FiveHour,quota)+" · 每周 "+TrayWindowQuota(quota==null?null:quota.Weekly,quota)));
-        menu.Items.Add(TrayInfo("月度 "+TrayWindowQuota(quota==null?null:new WindowUsage{Used=quota.MonthlyUsed,Cap=quota.MonthlyTotal},quota)+" · "+overview.Accounts+" 个账号"+(overview.Attention>0?" · "+overview.Attention+" 个待关注":"")));
+        if(quota!=null){menu.Items.Add(new TrayUsageBarItem{Month=new WindowUsage{Used=quota.MonthlyUsed,Cap=quota.MonthlyTotal,ResetAt=string.IsNullOrEmpty(quota.MonthlyResetAt)?quota.PeriodEnd:quota.MonthlyResetAt},Week=quota.Weekly,Five=quota.FiveHour,Unit=quota.UsageUnit,Limited=quota.Limited});}
+        AccountForecast todayForecast=current==null?new AccountForecast():Forecast(current,DateTimeOffset.UtcNow);
+        string todayText=todayForecast.TodayTokens.HasValue||todayForecast.TodayCost.HasValue?"今日 "+FormatTokenCount(todayForecast.TodayTokens??0)+" Token · "+(todayForecast.TodayCost.HasValue?Core.Money(todayForecast.TodayCost):"—"):"今日 暂无消耗记录";
+        menu.Items.Add(TrayInfo(todayText+" · "+overview.Accounts+" 个账号"+(overview.Attention>0?" · "+overview.Attention+" 个待关注":"")));
+
         menu.Items.Add(TrayInfo(ExpiryText(overview)));
         if(current!=null&&!string.IsNullOrEmpty(current.Error))menu.Items.Add(TrayInfo("同步异常，以上为最近记录"));
         menu.Items.Add(new ToolStripSeparator());
@@ -225,7 +229,7 @@ public class DesktopForm : Form {
         if(value>=1e4)return (value/1e4).ToString("0.#")+"万";
         return value.ToString("0");
     }
-    private sealed class AccountForecast { public double? Days; public double? PeriodDaysLeft; public bool CoversPeriod; public double?[] Trend = new double?[0]; }
+    private sealed class AccountForecast { public double? Days; public double? PeriodDaysLeft; public bool CoversPeriod; public double? TodayTokens; public double? TodayCost; public double?[] Trend = new double?[0]; }
     private AccountForecast Forecast(Account account, DateTimeOffset now) {
         AccountForecast forecast = new AccountForecast();
         AccountData data = account.Data;
@@ -233,6 +237,7 @@ public class DesktopForm : Form {
         TokenPeriod[] rows = null;
         if (!OpenCodeService.IsOpenCode(account)) { try { rows = historyCache.Read(account.Id, "day", 0, now).Rows; } catch { } }
         if (rows != null && rows.Length > 0) forecast.Trend = rows.Reverse().Select(row => row.Tokens).ToArray();
+        if (rows != null && rows.Length > 0) { DateTimeOffset rowStart; DateTimeOffset todayStart = new DateTimeOffset(now.ToOffset(TimeSpan.FromHours(8)).Date, TimeSpan.FromHours(8)); if (Core.TryTime(rows[0].Start, out rowStart) && rowStart >= todayStart) { forecast.TodayTokens = rows[0].Tokens; forecast.TodayCost = rows[0].Cost; } }
         if (verifying && (forecast.Trend.Length == 0 || forecast.Trend.All(value => !value.HasValue))) forecast.Trend = new double?[] { 118000, 265000, 176000, 438000, 302000, 524000, 236000 };
         if (!string.IsNullOrEmpty(account.Error) || !string.IsNullOrEmpty(data.Error)) return forecast;
         DateTimeOffset start, end;
@@ -253,6 +258,8 @@ public class DesktopForm : Form {
             mini.Moved=location=>{if(verifying||liveVerify)return;store.Settings.MiniX=location.X;store.Settings.MiniY=location.Y;Save();};
             mini.LockChanged=locked=>{if(verifying||liveVerify)return;store.Settings.MiniLocked=locked;Save();};
             mini.CloseRequested=()=>{store.Settings.MiniWindow=false;Save();if(mini!=null)mini.Hide();Push();BuildTrayMenu(tray.ContextMenuStrip);};
+            mini.ModeChanged=value=>{store.Settings.MiniMode=value;if(!verifying&&!liveVerify)Save();UpdateMini();};
+            mini.Mode=string.IsNullOrEmpty(store.Settings.MiniMode)?"bars":store.Settings.MiniMode;
             mini.Locked=store.Settings.MiniLocked;
             Rectangle area=Screen.FromControl(this).WorkingArea;
             int x=store.Settings.MiniX!=0?store.Settings.MiniX:area.Right-mini.Width-36;
@@ -273,9 +280,14 @@ public class DesktopForm : Form {
         if(mini==null||mini.IsDisposed||!mini.Visible)return;
         Overview overview=ReadOverview();
         string detail=overview.Accounts+" 个账号"+(overview.Attention>0?" · "+overview.Attention+" 待关注":"")+(overview.SoonestAt.HasValue?" · "+overview.SoonestAt.Value.ToOffset(TimeSpan.FromHours(8)).ToString("MM-dd")+" 到期":"");
+        mini.Mode=string.IsNullOrEmpty(store.Settings.MiniMode)?"bars":store.Settings.MiniMode;
+        Account active=store.Accounts.FirstOrDefault(a=>a.Id==activeId)??store.Accounts.FirstOrDefault();
+        AccountData quota=active==null?null:active.Data;
+        mini.UpdateBars(active==null?"":active.Name,PercentOf(quota==null?null:quota.MonthlyUsed,quota==null?null:quota.MonthlyTotal),PercentOf(quota==null||quota.Weekly==null?null:quota.Weekly.Used,quota==null||quota.Weekly==null?null:quota.Weekly.Cap),PercentOf(quota==null||quota.FiveHour==null?null:quota.FiveHour.Used,quota==null||quota.FiveHour==null?null:quota.FiveHour.Cap));
         mini.UpdateData(Core.Money(overview.Balance),overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast),detail);
         tray.Text="多账号工作台 · "+Core.Money(overview.Balance)+" · "+(overview.ForecastCount==0?"—":FormatTokenCount(overview.Forecast))+" Token";
     }
+    private static double? PercentOf(double? used,double? cap) { return used.HasValue && cap.HasValue && cap.Value > 0 ? Math.Max(0, Math.Min(100, used.Value / cap.Value * 100)) : (double?)null; }
     private ProxyRecord[] ReadProxyRecords(int take=40) { return ProxyRequestLog.Load(proxyLog,take); }
     private void AppendProxyRecord(ProxyRecord record) {
         if(verifying||liveVerify||string.IsNullOrEmpty(proxyLog))return;
@@ -350,7 +362,7 @@ public class DesktopForm : Form {
     private void ChangeProxyKeys(string operation,Dictionary<string,object> payload){var old=store.Proxy;var next=new JavaScriptSerializer().Deserialize<ProxySettings>(new JavaScriptSerializer().Serialize(old));ProxyWorkspace.Normalize(next);if(operation=="proxyKeyCreate")ProxyWorkspace.Create(next,Core.Text(payload,"name"));else{var key=ProxyWorkspace.Find(next,Core.Text(payload,"keyId"));if(operation=="proxyKeyDelete")next.AccessKeys.Remove(key);else key.Enabled=Core.Boolean(payload,"enabled")==true;}next.Secret=next.AccessKeys.Where(k=>k.Enabled).Select(k=>k.Secret).FirstOrDefault();store.Proxy=next;try{Save();}catch{store.Proxy=old;throw;}localProxy.SetAccessKeys(ProxyWorkspace.EnabledKeys(next));}
 
     private object State() {
-        lock (gate) { DateTimeOffset now=DateTimeOffset.UtcNow; Dictionary<string,AccountForecast> forecasts=store.Accounts.ToDictionary(a=>a.Id,a=>Forecast(a,now)); return new { accounts = store.Accounts.Select(a => new { id = a.Id, group = a.Group, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, now).Select(value => value.Text).ToArray(), balanceDays = forecasts[a.Id].Days, balanceCoversPeriod = forecasts[a.Id].CoversPeriod, trend = forecasts[a.Id].Trend }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) }; }
+        lock (gate) { DateTimeOffset now=DateTimeOffset.UtcNow; Dictionary<string,AccountForecast> forecasts=store.Accounts.ToDictionary(a=>a.Id,a=>Forecast(a,now)); return new { accounts = store.Accounts.Select(a => new { id = a.Id, group = a.Group, platform=OpenCodeService.IsOpenCode(a)?"opencode":"commandcode",providerId=a.ProviderId,providerName=OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):"CommandCode", name = a.Name, usage=UsageStatus(a), renewalAt=a.RenewalAt, refreshing = refreshingAccounts.Contains(a.Id), credentialState = a.CredentialState, credentialLabel = Core.CredentialLabel(a.CredentialState), credentialCheckedAt = a.CredentialCheckedAt, credentialMessage = a.CredentialMessage, officialUsagePanel = a.OfficialUsagePanel, method = a.Method, active = a.Id == activeId || openCodeActive.Contains(a.Id), switching = switching.Contains(a.Id), plan = OpenCodeService.IsOpenCode(a)?OpenCodeService.ProviderName(a.ProviderId):Core.PlanLabel(a.Data == null ? "" : a.Data.Plan), rawPlan = a.Data == null ? "" : a.Data.Plan, status = Core.StatusLabel(a.Data == null ? "" : a.Data.Status), error = a.Error, data = a.Data, alerts = Core.Alerts(a, store.Settings, now).Select(value => value.Text).ToArray(), balanceDays = forecasts[a.Id].Days, balanceCoversPeriod = forecasts[a.Id].CoversPeriod, trend = forecasts[a.Id].Trend, todayTokens = forecasts[a.Id].TodayTokens, todayCost = forecasts[a.Id].TodayCost }).ToArray(), update=new{status=updater.Status,latest=updater.Latest,progress=updater.Progress,error=updater.Error,notes=updater.Notes,publishedAt=updater.PublishedAt}, appVersion=appVersion, proxy=localProxy.State(),proxyConfig=new{autoJoin=store.Proxy.AutoJoin,keys=store.Proxy.AccessKeys.Select(k=>new{id=k.Id,name=k.Name,enabled=k.Enabled,createdAt=k.CreatedAt}).ToArray(),clients=ProxyClientSetup.Status()}, resizePrompt=resizePrompt, maximized = WindowState==FormWindowState.Maximized, refreshPaused = refreshPaused, singleRefreshing = refreshingAccounts.Count>0, transferBusy = transferBusy, settings = store.Settings, officialUsage = OfficialUsage.Status(), historySyncing = runningHistory.Count>0, refreshing = busy, completed = completed, total = store.Accounts.Count, loggingIn = login != null, environmentOverride = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("COMMAND_CODE_API_KEY")) }; }
     }
     private void Send(object message) {
         if(!ready)return;
@@ -597,7 +609,7 @@ public class DesktopForm : Form {
                 case "settings":
                     int interval = (int)(Core.Number(payload, "interval") ?? 0), warning = (int)(Core.Number(payload, "warning") ?? 0), critical = (int)(Core.Number(payload, "critical") ?? 0); double low = Core.Number(payload, "lowBalance") ?? -1;
                     if (interval < 60 || interval > 3600 || warning < 1 || warning >= critical || critical > 100 || low < 0) throw new InvalidOperationException("刷新需为 60–3600 秒，预警阈值需小于严重预警");
-                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight,MiniWindow=store.Settings.MiniWindow,MiniLocked=store.Settings.MiniLocked,MiniX=store.Settings.MiniX,MiniY=store.Settings.MiniY, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
+                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight,MiniWindow=store.Settings.MiniWindow,MiniLocked=store.Settings.MiniLocked,MiniMode=store.Settings.MiniMode,MiniX=store.Settings.MiniX,MiniY=store.Settings.MiniY, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
                     Save(); Schedule(); Push(); break;
                 case "history":
                     Account historyAccount=Find(Core.Text(payload,"accountId"));HistoryQuery historyQuery=Query(payload);string grain=historyQuery.Grain;int page=historyQuery.Page;DateTimeOffset historyNow=DateTimeOffset.UtcNow;int pages;DateTimeOffset[] boundaries=TokenHistoryCache.Dates(historyQuery,historyNow,out pages);
@@ -672,7 +684,7 @@ public class DesktopForm : Form {
                 BuildTrayMenu(tray.ContextMenuStrip);
                 ToolStripMenuItem quickSwitch=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(item=>item.Text=="快速切换账号");
                 bool accountMenu=quickSwitch.DropDownItems.Count==store.Accounts.Count;
-                report["trayMenu"]=new{accountMenu=accountMenu,quotaShown=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Count(item=>item.Text.StartsWith("余额 ")||item.Text.StartsWith("5 小时 ")||item.Text.StartsWith("月度 ")||item.Text.StartsWith("最快到期 "))==4,simpleMenu=!tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text.Contains("自动刷新")||item.Text=="打开账号总览"||item.Text=="隐藏到托盘"||item.Text=="桌面预警提醒"),miniToggle=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text=="显示悬浮窗"||item.Text=="隐藏悬浮窗")};
+                report["trayMenu"]=new{accountMenu=accountMenu,quotaShown=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Count(item=>item.Text.StartsWith("余额 ")||item.Text.StartsWith("今日 ")||item.Text.StartsWith("最快到期 "))==3,bars=tray.ContextMenuStrip.Items.OfType<TrayUsageBarItem>().Any(),simpleMenu=!tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text.Contains("自动刷新")||item.Text=="打开账号总览"||item.Text=="隐藏到托盘"||item.Text=="桌面预警提醒"),miniToggle=tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Any(item=>item.Text=="显示悬浮窗"||item.Text=="隐藏悬浮窗")};
                 ContextMenuStrip trayStrip=tray.ContextMenuStrip;trayStrip.PerformLayout();Size traySize=trayStrip.GetPreferredSize(Size.Empty);trayStrip.Size=traySize;string trayDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(trayDirectory);using(Bitmap shot=new Bitmap(Math.Max(1,traySize.Width),Math.Max(1,traySize.Height))){trayStrip.DrawToBitmap(shot,new Rectangle(Point.Empty,traySize));shot.Save(Path.Combine(trayDirectory,"tray-menu-preview.png"),System.Drawing.Imaging.ImageFormat.Png);}
                 bool topPopups = true;
                 foreach (string selector in new string[] { ".header-actions .primary", ".header-actions .settings-button", ".identity" }) {
@@ -742,12 +754,15 @@ public class DesktopForm : Form {
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.restart-client .confirm-actions button').click()");await Task.Delay(60);
                 bool independentDialogs=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.modal')&&!document.querySelector('.launch-button')&&!document.querySelector('.account-modal-tabs')") == "true";
                 report["separateAccountActions"]=new{panelRestartPrompt=panelRestartPrompt,independentDialogs=independentDialogs};if(!panelRestartPrompt||!independentDialogs)throw new InvalidOperationException("独立弹窗及客户端重启提示验证失败：prompt="+panelRestartPrompt+",dialogs="+independentDialogs);
-                await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.platform-tabs button')[0].click()");await Task.Delay(80);
+                await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.platform-tabs button')[0].click()");await Task.Delay(220);
                 report["usageColumns"]=new{order=await view.CoreWebView2.ExecuteScriptAsync("Array.from(document.querySelectorAll('.table-head>span')).slice(2,5).map(s=>s.textContent.replace(/\\s+/g,'')).join('|')") == new JavaScriptSerializer().Serialize("月度用量计费周期|每周用量|5小时用量"),forecast=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const card=document.querySelector('.stat-grid article:nth-child(3)');return card.querySelector('.stat-label').textContent.includes('预计可用 Token')&&card.querySelector('strong').textContent!=='—'})()") == "true"};
                 bool forecastCell=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');return !!cell&&/天|本周期够用/.test(cell.querySelector('b').textContent)&&!!cell.querySelector('svg.spark')&&!!cell.querySelector('small.spark-label')})()") == "true";
                 bool tableNoOverflow=await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('.table-shell').scrollWidth<=document.querySelector('.table-shell').clientWidth+1") == "true";
-                string forecastProbe=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');const shell=document.querySelector('.table-shell');return JSON.stringify({cell:!!cell,text:cell?cell.querySelector('b').textContent:null,spark:cell?!!cell.querySelector('svg.spark'):false,cards:!!document.querySelector('.card-grid'),scroll:shell.scrollWidth,client:shell.clientWidth})})()");
+                string forecastProbe=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const cell=document.querySelector('.account-row[data-platform=\"commandcode\"] .forecast-cell');const shell=document.querySelector('.table-shell');return JSON.stringify({cell:!!cell,text:cell?cell.querySelector('b').textContent:null,spark:cell?!!cell.querySelector('svg.spark'):false,cards:!!document.querySelector('.card-grid'),scroll:shell.scrollWidth,client:shell.clientWidth,rows:document.querySelectorAll('.account-row').length,width:innerWidth,panel:document.querySelector('.account-panel')?document.querySelector('.account-panel').clientWidth:-1,body:document.body.innerText.length})})()");
                 report["forecastCell"]=new{shown=forecastCell,noHorizontalOverflow=tableNoOverflow,probe=forecastProbe};if(!forecastCell||!tableNoOverflow)throw new InvalidOperationException("预计可用列显示异常："+forecastProbe);
+                bool costLine=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const node=document.querySelector('.account-row[data-platform=\"commandcode\"] .account-cost-total');return !!node&&/本周期花费|累计花费/.test(node.textContent)&&/\\$/.test(node.textContent)})()") == "true";
+                string costProbe=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const node=document.querySelector('.account-row[data-platform=\"commandcode\"] .account-cost-total');return JSON.stringify({found:!!node,text:node?node.textContent:null})})()");
+                report["costProbe"]=costProbe;if(!costLine)throw new InvalidOperationException("累计花费行未显示："+costProbe);
                 bool sparkDot=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const svg=document.querySelector('.account-row .forecast-cell svg.spark');if(!svg)return false;const dot=Array.from(svg.querySelectorAll('circle')).find(node=>node.getAttribute('r')==='7');if(!dot)return false;dot.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));return true})()") == "true";
                 await Task.Delay(150);
                 bool sparkTip=await view.CoreWebView2.ExecuteScriptAsync("(()=>{const tip=document.querySelector('.spark-tip');return !!tip&&/Token/.test(tip.textContent)&&/\\d/.test(tip.textContent)})()") == "true";

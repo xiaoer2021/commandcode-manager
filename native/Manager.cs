@@ -27,6 +27,7 @@ public class Settings {
     public bool OfficialUsagePanel { get; set; }
     public bool MiniWindow { get; set; }
     public bool MiniLocked { get; set; }
+    public string MiniMode { get; set; }
     public int MiniX { get; set; }
     public int MiniY { get; set; }
     public Settings() { Interval = 300; Warning = 80; Critical = 95; LowBalance = 5; Notifications = true; }
@@ -62,6 +63,7 @@ public class AccountData {
     public double? MonthlyUsed { get; set; }
     public double? MonthlyTotal { get; set; }
     public double? PeriodCost { get; set; }
+    public double? TotalCost { get; set; }
     public double? RequestCount { get; set; }
     public double? Remaining { get; set; }
     public double? Monthly { get; set; }

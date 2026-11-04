@@ -102,3 +102,5 @@ main{gap:13px}header{height:96px;padding-bottom:9px}.window-controls button{heig
 .spark-tip:after{content:'';position:absolute;left:50%;top:100%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e2d45}
 .card-grid .forecast-chart .spark-wrap{flex:1;width:auto!important;height:34px}
 .card-grid .forecast-chart .spark{width:100%;height:100%}
+.account-cost-total{display:block;font-size:10.5px;font-weight:500;color:#4a6a8c;white-space:nowrap;margin-top:2px;font-variant-numeric:tabular-nums}
+.cost-filter{border:1px solid #b9cbe0;border-radius:7px;background:#fff;color:#243651;font-size:11px;padding:7px 8px;max-width:132px}

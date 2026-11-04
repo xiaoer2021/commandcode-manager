@@ -1,6 +1,7 @@
 ## 本次更新
 
-- 7 日趋势图支持逐日悬停：每个数据点都有节点，鼠标移上去会高亮该点，并显示日期和当天 Token 数。
-- 曲线标注为「近 7 日 Token」；卡片视图同样支持悬停，并显示本周峰值。
+- 账号列表在「累计 Token」下方新增「本周期花费」，按每个账号自己的计费周期统计。
+- 托盘右键菜单直接画出当前账号的月度 / 每周 / 5 小时用量条，并显示今日 Token 与花费。
+- 悬浮窗支持两种显示模式（右键切换）：用量条 / 余额与预计 Token，选择会自动记住。
 
-![账号列表与 7 日趋势](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.16/overview.png)
+![账号列表与用量](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.17/overview.png)
