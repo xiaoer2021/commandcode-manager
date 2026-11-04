@@ -1,8 +1,6 @@
 ## 本次更新
 
-- 修正「预计可用」天数：改为按本周期额度（月度总量 − 已用）与本周期日均额度消耗计算，不再混用余额与实际请求费用导致天数虚高。
-- 按当前速度能撑到本周期重置时显示「本周期够用」，不再给出跨周期的天数。
-- 7 日趋势图新增「近 7 日 Token」标注，明确它是每日 Token 消耗，不是天数趋势。
-- 「预计可用 Token」统计卡改为按本周期额度消耗折算，口径与月度进度一致。
+- 7 日趋势图重做：平滑曲线、渐变面积、今日端点，鼠标悬停可查看每天的具体 Token。
+- 图表下方标注「近 7 日 Token」；卡片视图放大显示并标出本周峰值，避免和预计可用天数混淆。
 
-![账号列表与预计可用](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.14/overview.png)
+![账号列表与 7 日趋势](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.5.15/overview.png)
