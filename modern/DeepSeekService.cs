@@ -32,14 +32,18 @@ public sealed class DeepSeekService {
                     var root = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(await response.Content.ReadAsStringAsync());
                     var balances = Core.Value(root, "balance_infos") as System.Collections.IEnumerable;
                     if (balances != null) {
+                        double? cny = null, usd = null;
                         foreach (object balance in balances) {
                             var item = Core.Object(balance);
-                            if (Core.Text(item, "currency") == "USD") {
-                                double amount;
-                                if (double.TryParse(Core.Text(item, "total_balance"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out amount))
-                                    data.Remaining = amount;
+                            string currency = Core.Text(item, "currency");
+                            double amount;
+                            if (double.TryParse(Core.Text(item, "total_balance"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out amount)) {
+                                if (currency == "CNY") cny = amount;
+                                else if (currency == "USD") usd = amount;
                             }
                         }
+                        if (cny.HasValue) { data.Remaining = cny; data.UsageUnit = "cny"; }
+                        else if (usd.HasValue) { data.Remaining = usd; data.UsageUnit = "usd"; }
                     }
                 }
             }
