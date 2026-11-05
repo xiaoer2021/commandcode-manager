@@ -7,4 +7,4 @@
 - DeepSeek 账号操作按钮改为「配置客户端」，点击直接进入代理面板写入客户端。
 - 余额按币种分开显示，人民币（¥）与美元（$）不再混加。
 
-![账号列表与用量](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.6.9/overview.png)
+![账号列表与用量](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.6.10/overview.png)
