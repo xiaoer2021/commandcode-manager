@@ -84,7 +84,7 @@ public sealed class MiniWindow : Form {
         MouseUp += (s, e) => { if (e.Button == MouseButtons.Right) menu.Show(this, PointToClient(Cursor.Position)); };
         LocationChanged += (s, e) => Render();
     }
-    private Size ScaledSize { get { float scale = DpiScale; return new Size((int)Math.Round(244 * scale), (int)Math.Round((mode == "bars" ? 92 : 66) * scale)); } }
+    private Size ScaledSize { get { float scale = DpiScale; return new Size((int)Math.Round(300 * scale), (int)Math.Round((mode == "bars" ? 112 : 80) * scale)); } }
     private void UpdateSize() { if (IsHandleCreated) Size = ScaledSize; }
     private void UpdateModeItems() { barsItem.Text = (mode == "bars" ? "● " : "   ") + "用量条"; liveItem.Text = (mode == "live" ? "● " : "   ") + "实时消耗"; }
     private void ChangeMode(string value) { if (mode == value) return; mode = value; UpdateModeItems(); UpdateSize(); Render(); ModeChanged(value); }
@@ -98,7 +98,7 @@ public sealed class MiniWindow : Form {
         if (!IsHandleCreated) return;
         try { int corner = 2; DwmSetWindowAttribute(Handle, 33, ref corner, sizeof(int)); } catch { }
         try {
-            AccentPolicy accent = new AccentPolicy { AccentState = 4, AccentFlags = 2, GradientColor = unchecked((int)0x99F2F6FB), AnimationId = 0 };
+            AccentPolicy accent = new AccentPolicy { AccentState = 4, AccentFlags = 2, GradientColor = unchecked((int)0x60F2F6FB), AnimationId = 0 };
             int size = Marshal.SizeOf(typeof(AccentPolicy));
             IntPtr pointer = Marshal.AllocHGlobal(size);
             try {
@@ -137,10 +137,10 @@ public sealed class MiniWindow : Form {
         using (Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
         using (Graphics g = Graphics.FromImage(bitmap)) {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             using (GraphicsPath path = PaintStyle.Round(new Rectangle(0, 0, width, height), Radius)) {
-                using (SolidBrush fill = new SolidBrush(acrylic ? Color.FromArgb(46, 255, 255, 255) : Color.FromArgb(236, 247, 250, 253))) g.FillPath(fill, path);
-                using (Pen border = new Pen(Color.FromArgb(acrylic ? 70 : 42, 30, 70, 120), Math.Max(1f, DpiScale))) g.DrawPath(border, path);
+                using (SolidBrush fill = new SolidBrush(acrylic ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(150, 247, 250, 253))) g.FillPath(fill, path);
+                using (Pen border = new Pen(Color.FromArgb(acrylic ? 60 : 36, 30, 70, 120), Math.Max(1f, DpiScale))) g.DrawPath(border, path);
             }
             if (mode == "bars") RenderBars(g, width); else RenderLive(g, width);
             PushBitmap(bitmap);
@@ -148,44 +148,44 @@ public sealed class MiniWindow : Form {
     }
     private void RenderLive(Graphics g, int width) {
         float scale = DpiScale;
-        int pad = (int)Math.Round(14 * scale), half = width / 2;
-        using (Font valueFont = new Font("Microsoft YaHei UI", 15f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (Font labelFont = new Font("Microsoft YaHei UI", 10.5f * scale, GraphicsUnit.Pixel))
-        using (Font detailFont = new Font("Microsoft YaHei UI", 10.5f * scale, GraphicsUnit.Pixel))
+        int pad = (int)Math.Round(16 * scale), half = width / 2;
+        using (Font valueFont = new Font("Microsoft YaHei UI", 18f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (Font labelFont = new Font("Microsoft YaHei UI", 13f * scale, GraphicsUnit.Pixel))
+        using (Font detailFont = new Font("Microsoft YaHei UI", 13f * scale, GraphicsUnit.Pixel))
         using (SolidBrush ink = new SolidBrush(Ink)) using (SolidBrush muted = new SolidBrush(Muted)) using (SolidBrush accent = new SolidBrush(Accent)) {
-            g.DrawString(balance, valueFont, ink, new RectangleF(pad, 7 * scale, half - pad - 4, 24 * scale), leftFormat);
-            g.DrawString(forecast, valueFont, accent, new RectangleF(half + 2, 7 * scale, width - half - pad - 2, 24 * scale), rightFormat);
-            g.DrawString("可用余额", labelFont, muted, new RectangleF(pad, 31 * scale, half - pad - 4, 15 * scale), leftFormat);
-            g.DrawString("预计可用 Token", labelFont, muted, new RectangleF(half + 2, 31 * scale, width - half - pad - 2, 15 * scale), rightFormat);
-            using (Pen line = new Pen(Color.FromArgb(48, 30, 70, 120), Math.Max(1f, scale))) g.DrawLine(line, pad, 49 * scale, width - pad, 49 * scale);
-            g.DrawString(detail, detailFont, muted, new RectangleF(pad, 51 * scale, width - pad * 2, 15 * scale), leftFormat);
+            g.DrawString(balance, valueFont, ink, new RectangleF(pad, 8 * scale, half - pad - 4, 28 * scale), leftFormat);
+            g.DrawString(forecast, valueFont, accent, new RectangleF(half + 2, 8 * scale, width - half - pad - 2, 28 * scale), rightFormat);
+            g.DrawString("可用余额", labelFont, muted, new RectangleF(pad, 40 * scale, half - pad - 4, 18 * scale), leftFormat);
+            g.DrawString("预计可用 Token", labelFont, muted, new RectangleF(half + 2, 40 * scale, width - half - pad - 2, 18 * scale), rightFormat);
+            using (Pen line = new Pen(Color.FromArgb(48, 30, 70, 120), Math.Max(1f, scale))) g.DrawLine(line, pad, 62 * scale, width - pad, 62 * scale);
+            g.DrawString(detail, detailFont, muted, new RectangleF(pad, 64 * scale, width - pad * 2, 16 * scale), leftFormat);
         }
     }
     private void RenderBars(Graphics g, int width) {
         float scale = DpiScale;
-        int pad = (int)Math.Round(13 * scale), rowTop = (int)Math.Round(27 * scale), rowHeight = (int)Math.Round(20 * scale);
-        using (Font nameFont = new Font("Microsoft YaHei UI", 11.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (Font labelFont = new Font("Microsoft YaHei UI", 11f * scale, GraphicsUnit.Pixel))
-        using (Font valueFont = new Font("Microsoft YaHei UI", 11f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+        int pad = (int)Math.Round(15 * scale), rowTop = (int)Math.Round(36 * scale), rowHeight = (int)Math.Round(24 * scale);
+        using (Font nameFont = new Font("Microsoft YaHei UI", 14f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (Font labelFont = new Font("Microsoft YaHei UI", 13f * scale, GraphicsUnit.Pixel))
+        using (Font valueFont = new Font("Microsoft YaHei UI", 13f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
         using (SolidBrush ink = new SolidBrush(Ink)) using (SolidBrush muted = new SolidBrush(Muted)) {
-            g.DrawString(accountName, nameFont, ink, new RectangleF(pad, 7 * scale, width - pad * 2, 18 * scale), leftFormat);
+            g.DrawString(accountName, nameFont, ink, new RectangleF(pad, 8 * scale, width - pad * 2, 22 * scale), leftFormat);
             string[] labels = { "月度", "每周", "5 小时" };
             double?[] values = { monthPercent, weekPercent, fivePercent };
             for (int index = 0; index < 3; index++) {
                 int y = rowTop + index * rowHeight;
-                TextRenderer.DrawText(g, labels[index], labelFont, new Rectangle(pad, y, (int)Math.Round(44 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-                int left = pad + (int)Math.Round(48 * scale), right = width - pad - (int)Math.Round(38 * scale), trackWidth = Math.Max(10, right - left);
-                Rectangle track = new Rectangle(left, y + (int)Math.Round(7 * scale), trackWidth, (int)Math.Round(6 * scale));
-                using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(3 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
+                TextRenderer.DrawText(g, labels[index], labelFont, new Rectangle(pad, y, (int)Math.Round(50 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                int left = pad + (int)Math.Round(54 * scale), right = width - pad - (int)Math.Round(44 * scale), trackWidth = Math.Max(10, right - left);
+                Rectangle track = new Rectangle(left, y + (int)Math.Round(8 * scale), trackWidth, (int)Math.Round(8 * scale));
+                using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
                 if (values[index].HasValue) {
                     double percent = Math.Max(0, Math.Min(100, values[index].Value));
                     int fillWidth = Math.Max(2, (int)Math.Round(trackWidth * percent / 100d));
                     Rectangle fill = new Rectangle(left, track.Y, Math.Min(trackWidth, fillWidth), track.Height);
                     Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
-                    using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(3 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
-                    TextRenderer.DrawText(g, percent.ToString("0") + "%", valueFont, new Rectangle(width - pad - (int)Math.Round(36 * scale), y, (int)Math.Round(36 * scale), rowHeight), tone, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                    using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
+                    TextRenderer.DrawText(g, percent.ToString("0") + "%", valueFont, new Rectangle(width - pad - (int)Math.Round(42 * scale), y, (int)Math.Round(42 * scale), rowHeight), tone, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
                 } else {
-                    TextRenderer.DrawText(g, "—", valueFont, new Rectangle(width - pad - (int)Math.Round(36 * scale), y, (int)Math.Round(36 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                    TextRenderer.DrawText(g, "—", valueFont, new Rectangle(width - pad - (int)Math.Round(42 * scale), y, (int)Math.Round(42 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
                 }
             }
         }
