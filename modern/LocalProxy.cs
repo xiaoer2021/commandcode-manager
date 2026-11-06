@@ -61,6 +61,7 @@ public sealed class LocalProxy : IDisposable {
     public Action Changed=delegate{};
     public Action<ProxyRecord> Recorded=delegate{};
     public void LoadRecords(IEnumerable<ProxyRecord> history){lock(gate){records.Clear();if(history!=null)foreach(var record in history.Where(r=>r!=null).Reverse().Take(40).Reverse())records.Add(record);}Changed();}
+    static LocalProxy(){try{ServicePointManager.DefaultConnectionLimit=64;ServicePointManager.Expect100Continue=false;}catch{}}
     private static JavaScriptSerializer Json(){return new JavaScriptSerializer{MaxJsonLength=8388608,RecursionLimit=100};}
     public LocalProxy(Func<ProxyAccount[]> accounts,HttpMessageHandler handler=null){snapshot=accounts;upstream=handler==null?new HttpClient(new HttpClientHandler{AllowAutoRedirect=false,AutomaticDecompression=DecompressionMethods.GZip|DecompressionMethods.Deflate}):new HttpClient(handler);upstream.Timeout=TimeSpan.FromMinutes(5);upstream.DefaultRequestHeaders.UserAgent.ParseAdd("MultiAccountWorkspace-LocalProxy/1.0");}
     public static string GenerateKey(){byte[] bytes=new byte[32];using(var rng=RandomNumberGenerator.Create())rng.GetBytes(bytes);return "mw_"+Convert.ToBase64String(bytes).TrimEnd('=').Replace('+','-').Replace('/','_');}
@@ -182,6 +183,12 @@ public sealed class LocalProxy : IDisposable {
                                 last=status;
                                 continue;
                             }
+                            if(status==502||status==503||status==504){
+                                Cool(account.Id,DateTimeOffset.UtcNow.AddSeconds(15),"上游网关暂时异常");
+                                record.Note="上游网关 "+status+"，冷却 15 秒并尝试下一账号";
+                                last=status;
+                                continue;
+                            }
                             record.Note="上游拒绝，本次不自动重试";
                             await Failure(output,status,"upstream_rejected","上游返回 HTTP "+status+"；请检查模型、权限和请求参数");
                             committed();
@@ -227,9 +234,9 @@ public sealed class LocalProxy : IDisposable {
                     }
                 }
             }
-            catch(Exception){
+            catch(Exception error){
                 record.Status=token.IsCancellationRequested?499:502;
-                record.Note=token.IsCancellationRequested?"请求取消或超时，已停止上游且未重放":began?"输出中断，未自动换号或重放":"连接异常，未自动重试，避免重复计费";
+                record.Note=token.IsCancellationRequested?"请求取消或超时，已停止上游且未重放":began?"输出中断，未自动换号或重放":"连接异常（"+error.GetType().Name+"），未自动重试，避免重复计费";
                 throw;
             }
             finally{
@@ -239,7 +246,7 @@ public sealed class LocalProxy : IDisposable {
             }
         }
         if(!compatible)throw new ProtocolFailure(400,"账号池中没有这个模型的可用账号，请先检查模型 ID 和平台账号");
-        throw new ProtocolFailure(last==401?503:last,"所有兼容账号均被拒绝或额度暂不可用，请检查请求记录");
+        throw new ProtocolFailure(last==401?503:last,last>=500?"上游网关暂时异常（HTTP "+last+"），已尝试全部可用账号，请稍后重试":"所有兼容账号均被拒绝或额度暂不可用，请检查请求记录");
     }
     private static string ErrorCode(byte[] bytes){try{var data=Json().Deserialize<Dictionary<string,object>>(Encoding.UTF8.GetString(bytes));var error=Core.Object(Core.Value(data,"error"));return Core.Text(error,"code")==""?Core.Text(error,"type"):Core.Text(error,"code");}catch{return "";}}
     private static async Task<byte[]> Limited(Stream stream,int maximum,CancellationToken token){using(stream)using(var memory=new MemoryStream()){byte[] buffer=new byte[8192];int count;while((count=await stream.ReadAsync(buffer,0,buffer.Length,token))>0){if(memory.Length+count>maximum)throw new ProtocolFailure(502,"上游信息过大，请稍后重试");memory.Write(buffer,0,count);}return memory.ToArray();}}
