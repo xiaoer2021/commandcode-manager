@@ -22,7 +22,7 @@ public sealed class MiniWindow : Form {
     [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr handle);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr window, IntPtr destinationDc, ref NativePoint destination, ref NativeSize size, IntPtr sourceDc, ref NativePoint source, int colorKey, ref BlendFunction blend, int flags);
-    private static readonly Color Ink = Color.FromArgb(30, 45, 69), Muted = Color.FromArgb(74, 100, 128), Accent = Color.FromArgb(8, 116, 235), Track = Color.FromArgb(216, 228, 242);
+    private static readonly Color Ink = Color.FromArgb(30, 45, 69), Muted = Color.FromArgb(52, 73, 102), Accent = Color.FromArgb(8, 116, 235), Track = Color.FromArgb(216, 228, 242);
     public Action OpenMain = delegate { };
     public Action<Point> Moved = delegate { };
     public Action<bool> LockChanged = delegate { };
@@ -39,7 +39,7 @@ public sealed class MiniWindow : Form {
     private string mode = "bars", accountName = "当前账号";
     private double? monthPercent, weekPercent, fivePercent;
     private string balance = "—", forecast = "—", detail = "暂无账号";
-    private readonly StringFormat leftFormat = Align(false), rightFormat = Align(true);
+    private readonly StringFormat leftFormat = Align(false), rightFormat = Align(true), vLeft = VAlign(false), vRight = VAlign(true);
     private float DpiScale { get { return DeviceDpi / 96f; } }
     private int Radius { get { return (int)Math.Round(12 * DpiScale); } }
     public bool Blurred { get { return acrylic; } }
@@ -137,7 +137,7 @@ public sealed class MiniWindow : Form {
         using (Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
         using (Graphics g = Graphics.FromImage(bitmap)) {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             using (GraphicsPath path = PaintStyle.Round(new Rectangle(0, 0, width, height), Radius)) {
                 using (SolidBrush fill = new SolidBrush(acrylic ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(150, 247, 250, 253))) g.FillPath(fill, path);
                 using (Pen border = new Pen(Color.FromArgb(acrylic ? 60 : 36, 30, 70, 120), Math.Max(1f, DpiScale))) g.DrawPath(border, path);
@@ -173,7 +173,7 @@ public sealed class MiniWindow : Form {
             double?[] values = { monthPercent, weekPercent, fivePercent };
             for (int index = 0; index < 3; index++) {
                 int y = rowTop + index * rowHeight;
-                TextRenderer.DrawText(g, labels[index], labelFont, new Rectangle(pad, y, (int)Math.Round(50 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                g.DrawString(labels[index], labelFont, muted, new RectangleF(pad, y, 50 * scale, rowHeight), vLeft);
                 int left = pad + (int)Math.Round(54 * scale), right = width - pad - (int)Math.Round(44 * scale), trackWidth = Math.Max(10, right - left);
                 Rectangle track = new Rectangle(left, y + (int)Math.Round(8 * scale), trackWidth, (int)Math.Round(8 * scale));
                 using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
@@ -183,9 +183,9 @@ public sealed class MiniWindow : Form {
                     Rectangle fill = new Rectangle(left, track.Y, Math.Min(trackWidth, fillWidth), track.Height);
                     Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
                     using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
-                    TextRenderer.DrawText(g, percent.ToString("0") + "%", valueFont, new Rectangle(width - pad - (int)Math.Round(42 * scale), y, (int)Math.Round(42 * scale), rowHeight), tone, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                    using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
                 } else {
-                    TextRenderer.DrawText(g, "—", valueFont, new Rectangle(width - pad - (int)Math.Round(42 * scale), y, (int)Math.Round(42 * scale), rowHeight), Muted, TextFormatFlags.NoPadding | TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                    g.DrawString("—", valueFont, muted, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
                 }
             }
         }
@@ -195,6 +195,13 @@ public sealed class MiniWindow : Form {
         format.Trimming = StringTrimming.EllipsisCharacter;
         format.Alignment = right ? StringAlignment.Far : StringAlignment.Near;
         format.LineAlignment = StringAlignment.Near;
+        return format;
+    }
+    private static StringFormat VAlign(bool right) {
+        StringFormat format = new StringFormat(StringFormatFlags.NoWrap);
+        format.Trimming = StringTrimming.EllipsisCharacter;
+        format.Alignment = right ? StringAlignment.Far : StringAlignment.Near;
+        format.LineAlignment = StringAlignment.Center;
         return format;
     }
     private void PushBitmap(Bitmap bitmap) {
