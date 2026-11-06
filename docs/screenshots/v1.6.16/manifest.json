@@ -1,0 +1,11 @@
+{
+  "version": "1.6.16",
+  "demoData": true,
+  "source": "验证模式演示数据",
+  "images": [
+    { "file": "overview.png", "title": "账号列表与用量" },
+    { "file": "cards.png", "title": "卡片视图" },
+    { "file": "mini-window.png", "title": "任务栏高度的单行悬浮窗" },
+    { "file": "tray-menu.png", "title": "托盘菜单" }
+  ]
+}
