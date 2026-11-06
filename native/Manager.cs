@@ -30,6 +30,7 @@ public class Settings {
     public string MiniMode { get; set; }
     public int MiniX { get; set; }
     public int MiniY { get; set; }
+    public int MiniWidth { get; set; }
     public Settings() { Interval = 300; Warning = 80; Critical = 95; LowBalance = 5; Notifications = true; }
 }
 public class WindowUsage {

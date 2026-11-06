@@ -256,11 +256,13 @@ public class DesktopForm : Form {
             mini=new MiniWindow();
             mini.OpenMain=()=>{if(!IsDisposed)BeginInvoke(new Action(async()=>await ShowWindow()));};
             mini.Moved=location=>{if(verifying||liveVerify)return;store.Settings.MiniX=location.X;store.Settings.MiniY=location.Y;Save();};
+            mini.WidthChanged=(left,width)=>{if(verifying||liveVerify)return;store.Settings.MiniX=left;store.Settings.MiniWidth=width;Save();};
             mini.LockChanged=locked=>{if(verifying||liveVerify)return;store.Settings.MiniLocked=locked;Save();};
             mini.CloseRequested=()=>{store.Settings.MiniWindow=false;Save();if(mini!=null)mini.Hide();Push();BuildTrayMenu(tray.ContextMenuStrip);};
             mini.ModeChanged=value=>{store.Settings.MiniMode=value;if(!verifying&&!liveVerify)Save();UpdateMini();};
             mini.Mode=string.IsNullOrEmpty(store.Settings.MiniMode)?"bars":store.Settings.MiniMode;
             mini.Locked=store.Settings.MiniLocked;
+            if(store.Settings.MiniWidth>0)mini.SetWidth(store.Settings.MiniWidth);
             Rectangle area=Screen.FromControl(this).WorkingArea;
             int x=store.Settings.MiniX!=0?store.Settings.MiniX:area.Right-mini.Width-36;
             int y=store.Settings.MiniY!=0?store.Settings.MiniY:area.Top+72;
@@ -619,7 +621,7 @@ public class DesktopForm : Form {
                 case "settings":
                     int interval = (int)(Core.Number(payload, "interval") ?? 0), warning = (int)(Core.Number(payload, "warning") ?? 0), critical = (int)(Core.Number(payload, "critical") ?? 0); double low = Core.Number(payload, "lowBalance") ?? -1;
                     if (interval < 60 || interval > 3600 || warning < 1 || warning >= critical || critical > 100 || low < 0) throw new InvalidOperationException("刷新需为 60–3600 秒，预警阈值需小于严重预警");
-                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight,MiniWindow=store.Settings.MiniWindow,MiniLocked=store.Settings.MiniLocked,MiniMode=store.Settings.MiniMode,MiniX=store.Settings.MiniX,MiniY=store.Settings.MiniY, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
+                    store.Settings = new Settings { PageSize=store.Settings.PageSize,WindowWidth=store.Settings.WindowWidth,WindowHeight=store.Settings.WindowHeight,MiniWindow=store.Settings.MiniWindow,MiniLocked=store.Settings.MiniLocked,MiniMode=store.Settings.MiniMode,MiniX=store.Settings.MiniX,MiniY=store.Settings.MiniY, MiniWidth=store.Settings.MiniWidth, Interval = interval, Warning = warning, Critical = critical, LowBalance = low, Notifications = Core.Boolean(payload, "notifications") == true, OfficialUsagePanel = false };
                     Save(); Schedule(); Push(); break;
                 case "history":
                     Account historyAccount=Find(Core.Text(payload,"accountId"));HistoryQuery historyQuery=Query(payload);string grain=historyQuery.Grain;int page=historyQuery.Page;DateTimeOffset historyNow=DateTimeOffset.UtcNow;int pages;DateTimeOffset[] boundaries=TokenHistoryCache.Dates(historyQuery,historyNow,out pages);
@@ -786,8 +788,11 @@ public class DesktopForm : Form {
                 bool miniVisible=mini!=null&&mini.Visible&&!string.IsNullOrEmpty(mini.Snapshot);
                 report["groupUI"]=new{saved=groupSaved,shown=groupShown,cleared=groupCleared};
                 report["miniWindow"]=new{visible=miniVisible,blurred=mini!=null&&mini.Blurred,snapshot=mini==null?"":mini.Snapshot};
+                mini.SetWidth(560);string miniWide=mini.LayoutMode;int miniHeight=mini.Height;mini.SetWidth(320);string miniNarrow=mini.LayoutMode;mini.SetWidth(560);mini.Location=new Point(Math.Max(0,Math.Min(mini.Location.X,Screen.PrimaryScreen.WorkingArea.Right-mini.Width)),mini.Location.Y);
+                bool miniResponsive=miniWide=="row"&&miniNarrow=="column"&&mini.Height==miniHeight&&mini.LayoutMode=="row";
+                report["miniLayout"]=new{wide=miniWide,narrow=miniNarrow,width=mini.Width,height=mini.Height,responsive=miniResponsive};
                 if(miniVisible){try{string miniDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(miniDirectory);using(Bitmap shot=new Bitmap(mini.Width,mini.Height)){using(Graphics graphics=Graphics.FromImage(shot))graphics.CopyFromScreen(mini.Location,Point.Empty,mini.Size);shot.Save(Path.Combine(miniDirectory,"mini-preview.png"),System.Drawing.Imaging.ImageFormat.Png);}}catch{}mini.Hide();}
-                if(!groupSaved||!groupShown||!groupCleared||!miniVisible)throw new InvalidOperationException("分组或悬浮窗验证失败");
+                if(!groupSaved||!groupShown||!groupCleared||!miniVisible||!miniResponsive)throw new InvalidOperationException("分组或悬浮窗验证失败");
                 report["workspaceUI"]=new{openCodeAtTop=openCodeAtTop,remainingQuota=remainingQuota,cardLayout=cardLayout,multiCardLayout=multiCardLayout,renewalCalendar=renewalCalendar,rangeCalendar=rangeCalendar,platformLogos=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.identity .platform-logo').length===document.querySelectorAll('.account-row').length") == "true",monitorRemoved=await view.CoreWebView2.ExecuteScriptAsync("!document.querySelector('.monitor')") == "true",fourSummaryCards=await view.CoreWebView2.ExecuteScriptAsync("document.querySelectorAll('.stat-grid article').length===4") == "true",onlyOpenCode=onlyOpenCode,onlyCommandCode=onlyCommandCode,renewalEditor=renewalEditor,renewalSaved=renewalSaved,insideKeeps=insideKeeps,outsideCloses=outsideCloses};
                 await view.CoreWebView2.ExecuteScriptAsync("document.querySelector('[data-platform=\"opencode\"] .identity').click()");await Task.Delay(100);
                 string previewDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");using(FileStream openCodePreview=File.Create(Path.Combine(previewDirectory,"opencode-preview.png")))await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,openCodePreview);

@@ -1,11 +1,8 @@
 ## 本次更新
 
-- 悬浮窗字体变清晰：修复透明背景下文字发虚、边缘模糊的问题（改用灰度抗锯齿渲染，替代不兼容透明窗口的 ClearType）。
-- 悬浮窗放大：窗口尺寸加大、字体加大，显示更清晰。
-- 悬浮窗更透明：背景与亚克力效果更通透，方便查看下方内容。
-- 新增 DeepSeek 平台：作为上游模型 API 接入本地代理，供 CommandCode、OpenCode 客户端通过代理调用 DeepSeek 模型。
-- 修复：Command Code 客户端里「工作台代理」Provider 无法显示的问题。
-- DeepSeek 账号操作按钮改为「配置客户端」，点击直接进入代理面板写入客户端。
-- 余额按币种分开显示，人民币（¥）与美元（$）不再混加。
+- 悬浮窗可拉宽：拖动窗口左右边缘即可调整宽度，高度保持固定，不再只能固定尺寸。
+- 悬浮窗自适应排版：窄的时候「月度 / 每周 / 5 小时」各占一行；拉宽到一定尺寸后自动变成一排三个，横向并排显示。
+- 悬浮窗只横向移动：拖动窗口时只改变左右位置，上下位置保持不变，避免误拖挡住别的内容。
+- 宽度与位置自动记忆，重启后保持上次的布局。
 
-![账号列表与用量](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.6.11/overview.png)
+![悬浮窗宽窄布局](https://github.com/xiaoer2021/commandcode-manager/releases/download/v1.6.12/mini-window.png)
