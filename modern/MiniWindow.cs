@@ -163,7 +163,7 @@ public sealed class MiniWindow : Form {
     private void DragMove(object sender, MouseEventArgs e) {
         if (!dragging) return;
         Point current = Cursor.Position;
-        Location = new Point(windowStart.X + current.X - dragStart.X, windowStart.Y);
+        Location = new Point(windowStart.X + current.X - dragStart.X, windowStart.Y + current.Y - dragStart.Y);
     }
     private void DragEnd(object sender, MouseEventArgs e) {
         if (!dragging) return;
@@ -210,22 +210,26 @@ public sealed class MiniWindow : Form {
             string[] labels = { "月度", "每周", "5 小时" };
             double?[] values = { monthPercent, weekPercent, fivePercent };
             if (WideLayout) {
-                int gap = (int)Math.Round(16 * scale), top = (int)Math.Round(46 * scale);
+                int gap = (int)Math.Round(20 * scale), top = (int)Math.Round(40 * scale);
                 int columnWidth = Math.Max(60, (width - pad * 2 - gap * 2) / 3);
+                int labelWidth = (int)Math.Round(48 * scale), valueWidth = (int)Math.Round(46 * scale);
                 for (int index = 0; index < 3; index++) {
                     int left = pad + index * (columnWidth + gap);
-                    g.DrawString(labels[index], labelFont, muted, new RectangleF(left, top, columnWidth - (int)Math.Round(48 * scale), 20 * scale), vLeft);
+                    if (index > 0) using (Pen divider = new Pen(Color.FromArgb(34, 30, 70, 120), Math.Max(1f, scale))) g.DrawLine(divider, left - gap / 2, top + 2 * scale, left - gap / 2, top + 32 * scale);
+                    g.DrawString(labels[index], labelFont, muted, new RectangleF(left, top, labelWidth, 20 * scale), vLeft);
                     if (values[index].HasValue) {
                         double percent = Math.Max(0, Math.Min(100, values[index].Value));
                         Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
-                        using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(left + columnWidth - (int)Math.Round(46 * scale), top, 46 * scale, 20 * scale), vRight);
-                        Rectangle track = new Rectangle(left, top + (int)Math.Round(26 * scale), columnWidth, (int)Math.Round(8 * scale));
-                        using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
-                        int fillWidth = Math.Max(2, (int)Math.Round(columnWidth * percent / 100d));
-                        Rectangle fill = new Rectangle(left, track.Y, Math.Min(columnWidth, fillWidth), track.Height);
-                        using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
+                        using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(left + labelWidth, top, valueWidth, 20 * scale), vLeft);
+                        Rectangle track = new Rectangle(left, top + (int)Math.Round(22 * scale), columnWidth, (int)Math.Round(10 * scale));
+                        using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(5 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
+                        if (percent > 0) {
+                            int fillWidth = Math.Max((int)Math.Round(5 * scale), (int)Math.Round(columnWidth * percent / 100d));
+                            Rectangle fill = new Rectangle(left, track.Y, Math.Min(columnWidth, fillWidth), track.Height);
+                            using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(5 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
+                        }
                     } else {
-                        g.DrawString("—", valueFont, muted, new RectangleF(left + columnWidth - (int)Math.Round(46 * scale), top, 46 * scale, 20 * scale), vRight);
+                        g.DrawString("—", valueFont, muted, new RectangleF(left + labelWidth, top, valueWidth, 20 * scale), vLeft);
                     }
                 }
             } else {
@@ -238,10 +242,12 @@ public sealed class MiniWindow : Form {
                     using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
                     if (values[index].HasValue) {
                         double percent = Math.Max(0, Math.Min(100, values[index].Value));
-                        int fillWidth = Math.Max(2, (int)Math.Round(trackWidth * percent / 100d));
-                        Rectangle fill = new Rectangle(left, track.Y, Math.Min(trackWidth, fillWidth), track.Height);
                         Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
-                        using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
+                        if (percent > 0) {
+                            int fillWidth = Math.Max((int)Math.Round(5 * scale), (int)Math.Round(trackWidth * percent / 100d));
+                            Rectangle fill = new Rectangle(left, track.Y, Math.Min(trackWidth, fillWidth), track.Height);
+                            using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
+                        }
                         using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
                     } else {
                         g.DrawString("—", valueFont, muted, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
