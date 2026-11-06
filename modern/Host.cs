@@ -788,8 +788,8 @@ public class DesktopForm : Form {
                 bool miniVisible=mini!=null&&mini.Visible&&!string.IsNullOrEmpty(mini.Snapshot);
                 report["groupUI"]=new{saved=groupSaved,shown=groupShown,cleared=groupCleared};
                 report["miniWindow"]=new{visible=miniVisible,blurred=mini!=null&&mini.Blurred,snapshot=mini==null?"":mini.Snapshot};
-                mini.SetWidth(560);string miniWide=mini.LayoutMode;int miniHeight=mini.Height;mini.SetWidth(320);string miniNarrow=mini.LayoutMode;mini.SetWidth(560);mini.Location=new Point(Math.Max(0,Math.Min(mini.Location.X,Screen.PrimaryScreen.WorkingArea.Right-mini.Width)),mini.Location.Y);
-                bool miniResponsive=miniWide=="row"&&miniNarrow=="column"&&mini.Height==miniHeight&&mini.LayoutMode=="row";
+                mini.SetWidth(560);int miniWide=mini.Width;int miniHeight=mini.Height;mini.SetWidth(300);int miniNarrow=mini.Width;mini.SetWidth(560);mini.Location=new Point(Math.Max(0,Math.Min(mini.Location.X,Screen.PrimaryScreen.WorkingArea.Right-mini.Width)),mini.Location.Y);
+                bool miniResponsive=miniWide==560&&miniNarrow==300&&mini.Height==miniHeight&&mini.Height==(int)Math.Round(44*mini.DeviceDpi/96f);
                 report["miniLayout"]=new{wide=miniWide,narrow=miniNarrow,width=mini.Width,height=mini.Height,responsive=miniResponsive};
                 if(miniVisible){try{string miniDirectory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(miniDirectory);using(Bitmap shot=new Bitmap(mini.Width,mini.Height)){using(Graphics graphics=Graphics.FromImage(shot))graphics.CopyFromScreen(mini.Location,Point.Empty,mini.Size);shot.Save(Path.Combine(miniDirectory,"mini-preview.png"),System.Drawing.Imaging.ImageFormat.Png);}}catch{}mini.Hide();}
                 if(!groupSaved||!groupShown||!groupCleared||!miniVisible||!miniResponsive)throw new InvalidOperationException("分组或悬浮窗验证失败");

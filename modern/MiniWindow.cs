@@ -34,7 +34,7 @@ public sealed class MiniWindow : Form {
     private readonly ToolStripMenuItem barsItem = new ToolStripMenuItem("用量条");
     private readonly ToolStripMenuItem liveItem = new ToolStripMenuItem("实时消耗");
     private readonly ToolStripMenuItem openItem = new ToolStripMenuItem("打开主界面");
-    private readonly ToolStripMenuItem lockItem = new ToolStripMenuItem("锁定位置");
+    private readonly ToolStripMenuItem lockItem = new ToolStripMenuItem("固定位置（锁定）");
     private readonly ToolStripMenuItem closeItem = new ToolStripMenuItem("关闭悬浮窗");
     private bool acrylic, dragging, locked;
     private Point dragStart, windowStart;
@@ -47,10 +47,8 @@ public sealed class MiniWindow : Form {
     private int Radius { get { return (int)Math.Round(12 * DpiScale); } }
     public bool Blurred { get { return acrylic; } }
     public string Mode { get { return mode; } set { mode = string.IsNullOrEmpty(value) ? "bars" : value; UpdateModeItems(); UpdateSize(); Render(); } }
-    public bool Locked { get { return locked; } set { locked = value; lockItem.Text = value ? "解锁位置（可移动）" : "锁定位置（不可移动）"; } }
+    public bool Locked { get { return locked; } set { locked = value; lockItem.Text = value ? "解除固定（可移动）" : "固定位置（锁定）"; } }
     public string Snapshot { get { return balance + "|" + forecast + "|" + detail + "|" + (monthPercent.HasValue ? monthPercent.Value.ToString("0") : "-"); } }
-    public string LayoutMode { get { return mode == "bars" ? (WideLayout ? "row" : "column") : "live"; } }
-    private bool WideLayout { get { return Width >= (int)Math.Round(460 * DpiScale); } }
     public void SetWidth(int width) { float scale = DpiScale; int minimum = (int)Math.Round(280 * scale), maximum = (int)Math.Round(1200 * scale); desiredWidth = Math.Max(minimum, Math.Min(maximum, width)); if (IsHandleCreated) Width = desiredWidth; }
     public MiniWindow() {
         FormBorderStyle = FormBorderStyle.None;
@@ -90,7 +88,7 @@ public sealed class MiniWindow : Form {
         MouseUp += (s, e) => { if (e.Button == MouseButtons.Right) menu.Show(this, PointToClient(Cursor.Position)); };
         LocationChanged += (s, e) => Render();
     }
-    private Size ScaledSize { get { float scale = DpiScale; int width = desiredWidth > 0 ? desiredWidth : (int)Math.Round(300 * scale); return new Size(width, (int)Math.Round((mode == "bars" ? 112 : 80) * scale)); } }
+    private Size ScaledSize { get { float scale = DpiScale; int width = desiredWidth > 0 ? desiredWidth : (int)Math.Round(320 * scale); return new Size(width, (int)Math.Round((mode == "bars" ? 44 : 80) * scale)); } }
     private void UpdateSize() { if (IsHandleCreated) Size = ScaledSize; }
     private void UpdateModeItems() { barsItem.Text = (mode == "bars" ? "● " : "   ") + "用量条"; liveItem.Text = (mode == "live" ? "● " : "   ") + "实时消耗"; }
     private void ChangeMode(string value) { if (mode == value) return; mode = value; UpdateModeItems(); UpdateSize(); Render(); ModeChanged(value); }
@@ -201,57 +199,33 @@ public sealed class MiniWindow : Form {
     }
     private void RenderBars(Graphics g, int width) {
         float scale = DpiScale;
-        int pad = (int)Math.Round(15 * scale);
-        using (Font nameFont = new Font("Microsoft YaHei UI", 14f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (Font labelFont = new Font("Microsoft YaHei UI", 13f * scale, GraphicsUnit.Pixel))
-        using (Font valueFont = new Font("Microsoft YaHei UI", 13f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+        int pad = (int)Math.Round(11 * scale), top = (int)Math.Round(17 * scale), gap = (int)Math.Round(14 * scale);
+        int columnWidth = Math.Max(54, (width - pad * 2 - gap * 2) / 3);
+        int labelWidth = (int)Math.Round(42 * scale), valueWidth = (int)Math.Round(44 * scale);
+        using (Font nameFont = new Font("Microsoft YaHei UI", 11.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (Font labelFont = new Font("Microsoft YaHei UI", 11f * scale, GraphicsUnit.Pixel))
+        using (Font valueFont = new Font("Microsoft YaHei UI", 11.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
         using (SolidBrush ink = new SolidBrush(Ink)) using (SolidBrush muted = new SolidBrush(Muted)) {
-            g.DrawString(accountName, nameFont, ink, new RectangleF(pad, 8 * scale, width - pad * 2, 22 * scale), leftFormat);
+            g.DrawString(accountName, nameFont, ink, new RectangleF(pad, 2 * scale, width - pad * 2, 15 * scale), leftFormat);
             string[] labels = { "月度", "每周", "5 小时" };
             double?[] values = { monthPercent, weekPercent, fivePercent };
-            if (WideLayout) {
-                int gap = (int)Math.Round(20 * scale), top = (int)Math.Round(40 * scale);
-                int columnWidth = Math.Max(60, (width - pad * 2 - gap * 2) / 3);
-                int labelWidth = (int)Math.Round(48 * scale), valueWidth = (int)Math.Round(46 * scale);
-                for (int index = 0; index < 3; index++) {
-                    int left = pad + index * (columnWidth + gap);
-                    if (index > 0) using (Pen divider = new Pen(Color.FromArgb(34, 30, 70, 120), Math.Max(1f, scale))) g.DrawLine(divider, left - gap / 2, top + 2 * scale, left - gap / 2, top + 32 * scale);
-                    g.DrawString(labels[index], labelFont, muted, new RectangleF(left, top, labelWidth, 20 * scale), vLeft);
-                    if (values[index].HasValue) {
-                        double percent = Math.Max(0, Math.Min(100, values[index].Value));
-                        Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
-                        using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(left + labelWidth, top, valueWidth, 20 * scale), vLeft);
-                        Rectangle track = new Rectangle(left, top + (int)Math.Round(22 * scale), columnWidth, (int)Math.Round(10 * scale));
-                        using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(5 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
-                        if (percent > 0) {
-                            int fillWidth = Math.Max((int)Math.Round(5 * scale), (int)Math.Round(columnWidth * percent / 100d));
-                            Rectangle fill = new Rectangle(left, track.Y, Math.Min(columnWidth, fillWidth), track.Height);
-                            using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(5 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
-                        }
-                    } else {
-                        g.DrawString("—", valueFont, muted, new RectangleF(left + labelWidth, top, valueWidth, 20 * scale), vLeft);
+            for (int index = 0; index < 3; index++) {
+                int left = pad + index * (columnWidth + gap);
+                if (index > 0) using (Pen divider = new Pen(Color.FromArgb(30, 30, 70, 120), Math.Max(1f, scale))) g.DrawLine(divider, left - gap / 2, top + 2 * scale, left - gap / 2, top + 19 * scale);
+                g.DrawString(labels[index], labelFont, muted, new RectangleF(left, top, labelWidth, 14 * scale), vLeft);
+                if (values[index].HasValue) {
+                    double percent = Math.Max(0, Math.Min(100, values[index].Value));
+                    Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
+                    using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(left + labelWidth, top, valueWidth, 14 * scale), vLeft);
+                    Rectangle track = new Rectangle(left, top + (int)Math.Round(15 * scale), columnWidth, (int)Math.Round(5 * scale));
+                    using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(3 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
+                    if (percent > 0) {
+                        int fillWidth = Math.Max((int)Math.Round(4 * scale), (int)Math.Round(columnWidth * percent / 100d));
+                        Rectangle fill = new Rectangle(left, track.Y, Math.Min(columnWidth, fillWidth), track.Height);
+                        using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(3 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
                     }
-                }
-            } else {
-                int rowTop = (int)Math.Round(36 * scale), rowHeight = (int)Math.Round(24 * scale);
-                for (int index = 0; index < 3; index++) {
-                    int y = rowTop + index * rowHeight;
-                    g.DrawString(labels[index], labelFont, muted, new RectangleF(pad, y, 50 * scale, rowHeight), vLeft);
-                    int left = pad + (int)Math.Round(54 * scale), right = width - pad - (int)Math.Round(44 * scale), trackWidth = Math.Max(10, right - left);
-                    Rectangle track = new Rectangle(left, y + (int)Math.Round(8 * scale), trackWidth, (int)Math.Round(8 * scale));
-                    using (GraphicsPath path = PaintStyle.Round(track, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(Track)) g.FillPath(brush, path);
-                    if (values[index].HasValue) {
-                        double percent = Math.Max(0, Math.Min(100, values[index].Value));
-                        Color tone = percent >= 95 ? Color.FromArgb(227, 96, 90) : percent >= 80 ? Color.FromArgb(211, 144, 35) : Accent;
-                        if (percent > 0) {
-                            int fillWidth = Math.Max((int)Math.Round(5 * scale), (int)Math.Round(trackWidth * percent / 100d));
-                            Rectangle fill = new Rectangle(left, track.Y, Math.Min(trackWidth, fillWidth), track.Height);
-                            using (GraphicsPath path = PaintStyle.Round(fill, (int)Math.Round(4 * scale))) using (SolidBrush brush = new SolidBrush(tone)) g.FillPath(brush, path);
-                        }
-                        using (SolidBrush toneBrush = new SolidBrush(tone)) g.DrawString(percent.ToString("0") + "%", valueFont, toneBrush, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
-                    } else {
-                        g.DrawString("—", valueFont, muted, new RectangleF(width - pad - 42 * scale, y, 42 * scale, rowHeight), vRight);
-                    }
+                } else {
+                    g.DrawString("—", valueFont, muted, new RectangleF(left + labelWidth, top, valueWidth, 14 * scale), vLeft);
                 }
             }
         }
