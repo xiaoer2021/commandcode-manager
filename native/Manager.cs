@@ -22,6 +22,7 @@ public class Settings {
     public int WindowHeight { get; set; }
     public int Warning { get; set; }
     public int Critical { get; set; }
+    public int ProxyReserve { get; set; }
     public double LowBalance { get; set; }
     public bool Notifications { get; set; }
     public bool OfficialUsagePanel { get; set; }
@@ -31,7 +32,7 @@ public class Settings {
     public int MiniX { get; set; }
     public int MiniY { get; set; }
     public int MiniWidth { get; set; }
-    public Settings() { Interval = 300; Warning = 80; Critical = 95; LowBalance = 5; Notifications = true; }
+    public Settings() { Interval = 300; Warning = 80; Critical = 95; ProxyReserve = 3; LowBalance = 5; Notifications = true; }
 }
 public class WindowUsage {
     public double? Used { get; set; }
